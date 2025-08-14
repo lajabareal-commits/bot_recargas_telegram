@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+python-telegram-bot==20.9
+psycopg2-binary  # si usas PostgreSQL
+# O si usas SQLite (por defecto):
+# sqlite3 (ya viene con Python)
