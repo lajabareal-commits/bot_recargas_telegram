@@ -4,65 +4,97 @@ from services.database import get_db
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CallbackQueryHandler, MessageHandler, filters
 import config
+import logging
 
-# --- Funciones de acceso a datos (PostgreSQL) ---
+logger = logging.getLogger(__name__)
+
+# -------------------------------
+# Funciones de acceso a datos
+# -------------------------------
 
 def cargar_lineas():
     """Obtiene todas las líneas de la base de datos."""
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT numero, nombre, es_principal FROM lineas ORDER BY nombre")
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT numero, nombre, es_principal FROM lineas ORDER BY nombre")
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        logger.error(f"❌ Error cargando líneas: {e}", exc_info=True)
+        return []
 
 def guardar_linea(numero: str, nombre: str, es_principal: bool = False):
     """Guarda una nueva línea o actualiza si ya existe."""
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO lineas (numero, nombre, es_principal) VALUES (%s, %s, %s) "
-        "ON CONFLICT (numero) DO UPDATE SET nombre = EXCLUDED.nombre",
-        (numero, nombre, es_principal)
-    )
-    conn.commit()
-    conn.close()
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO lineas (numero, nombre, es_principal) VALUES (%s, %s, %s) "
+            "ON CONFLICT (numero) DO UPDATE SET nombre = EXCLUDED.nombre",
+            (numero, nombre, es_principal)
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+        logger.info(f"✅ Línea {numero} guardada con nombre {nombre}")
+    except Exception as e:
+        logger.error(f"❌ Error guardando línea {numero}: {e}", exc_info=True)
 
 def establecer_principal(numero: str):
     """Establece una línea como principal (y desmarca las demás)."""
-    conn = get_db()
-    cursor = conn.cursor()
-    # Verificar que exista
-    cursor.execute("SELECT numero FROM lineas WHERE numero = %s", (numero,))
-    if cursor.fetchone() is None:
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT numero FROM lineas WHERE numero = %s", (numero,))
+        if cursor.fetchone() is None:
+            cursor.close()
+            conn.close()
+            return False
+        cursor.execute("UPDATE lineas SET es_principal = FALSE")
+        cursor.execute("UPDATE lineas SET es_principal = TRUE WHERE numero = %s", (numero,))
+        conn.commit()
+        cursor.close()
         conn.close()
+        logger.info(f"⭐ Línea {numero} establecida como principal")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Error estableciendo principal {numero}: {e}", exc_info=True)
         return False
-    # Desmarcar todas
-    cursor.execute("UPDATE lineas SET es_principal = FALSE")
-    # Marcar como principal
-    cursor.execute("UPDATE lineas SET es_principal = TRUE WHERE numero = %s", (numero,))
-    conn.commit()
-    conn.close()
-    return True
 
 def eliminar_linea(numero: str):
     """Elimina una línea por número."""
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM lineas WHERE numero = %s", (numero,))
-    conn.commit()
-    conn.close()
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM lineas WHERE numero = %s", (numero,))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        logger.info(f"🗑️ Línea {numero} eliminada")
+    except Exception as e:
+        logger.error(f"❌ Error eliminando línea {numero}: {e}", exc_info=True)
 
 def obtener_principal():
     """Devuelve la línea principal, o None si no hay."""
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT numero, nombre FROM lineas WHERE es_principal = TRUE")
-    row = cursor.fetchone()
-    conn.close()
-    return dict(row) if row else None
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT numero, nombre FROM lineas WHERE es_principal = TRUE")
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        logger.error(f"❌ Error obteniendo línea principal: {e}", exc_info=True)
+        return None
 
-# --- Menú principal (/start) ---
+# -------------------------------
+# Menús
+# -------------------------------
+
 def menu_principal_markup():
     keyboard = [
         [InlineKeyboardButton("🔍 Consultar líneas", callback_data="consultar_lineas")],
@@ -72,7 +104,6 @@ def menu_principal_markup():
     ]
     return InlineKeyboardMarkup(keyboard)
 
-# --- Menú de gestión ---
 def menu_gestion_markup():
     keyboard = [
         [InlineKeyboardButton("🗑️ Eliminar línea", callback_data="eliminar_linea")],
@@ -81,9 +112,10 @@ def menu_gestion_markup():
     ]
     return InlineKeyboardMarkup(keyboard)
 
-# --- Handlers ---
+# -------------------------------
+# Handlers de Telegram
+# -------------------------------
 
-# 1. Mostrar menú de gestión
 async def gestionar_lineas(update, context):
     query = update.callback_query
     await query.answer()
@@ -116,7 +148,6 @@ async def gestionar_lineas(update, context):
 
     await query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode="Markdown")
 
-# 2. Solicitar nueva línea
 async def solicitar_nueva_linea(update, context):
     query = update.callback_query
     await query.answer()
@@ -124,7 +155,6 @@ async def solicitar_nueva_linea(update, context):
     context.user_data['esperando_linea'] = True
     context.user_data['esperando_nombre'] = False
 
-# 3. Recibir número o nombre
 async def recibir_linea(update, context):
     user_data = context.user_data
 
@@ -156,7 +186,6 @@ async def recibir_linea(update, context):
             return
 
         numero = user_data['nuevo_numero']
-        # Guardar en PostgreSQL
         guardar_linea(numero, nombre)
         await update.message.reply_text(
             f"✅ Línea `{numero}` agregada con nombre *{nombre}*.",
@@ -167,7 +196,6 @@ async def recibir_linea(update, context):
         await update.message.reply_text("¿Qué deseas hacer ahora?", reply_markup=menu_gestion_markup())
         return
 
-# 4. Eliminar línea
 async def eliminar_linea(update, context):
     query = update.callback_query
     await query.answer()
@@ -191,7 +219,6 @@ async def eliminar_linea(update, context):
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-# 5. Confirmar eliminación
 async def confirmar_eliminar(update, context):
     query = update.callback_query
     await query.answer()
@@ -205,7 +232,6 @@ async def confirmar_eliminar(update, context):
         parse_mode="Markdown"
     )
 
-# 6. Elegir principal
 async def elegir_principal(update, context):
     query = update.callback_query
     await query.answer()
@@ -230,7 +256,6 @@ async def elegir_principal(update, context):
         parse_mode="Markdown"
     )
 
-# 7. Confirmar principal
 async def confirmar_principal(update, context):
     query = update.callback_query
     await query.answer()
@@ -245,7 +270,6 @@ async def confirmar_principal(update, context):
         )
         return
 
-    # Obtener nombre para mostrar
     lineas = cargar_lineas()
     nombre = next((l["nombre"] for l in lineas if l["numero"] == numero), numero)
 
@@ -255,18 +279,18 @@ async def confirmar_principal(update, context):
         parse_mode="Markdown"
     )
 
-# 8. Volver atrás
 async def volver_atras(update, context):
     query = update.callback_query
     await query.answer()
-
     await query.edit_message_text(
-        text="👋 Hola, soy tu bot personal de gestión de líneas móviles.\n"
-             "Selecciona una opción:",
+        text="👋 Hola, soy tu bot personal de gestión de líneas móviles.\nSelecciona una opción:",
         reply_markup=menu_principal_markup()
     )
 
-# --- Exportar handlers ---
+# -------------------------------
+# Exportar handlers
+# -------------------------------
+
 lineas_handlers = [
     CallbackQueryHandler(gestionar_lineas, pattern="^gestionar_lineas$"),
     CallbackQueryHandler(solicitar_nueva_linea, pattern="^agregar_linea$"),
@@ -277,3 +301,4 @@ lineas_handlers = [
     CallbackQueryHandler(volver_atras, pattern="^atras$"),
     MessageHandler(filters.TEXT & filters.User(user_id=config.ADMIN_ID), recibir_linea),
 ]
+
