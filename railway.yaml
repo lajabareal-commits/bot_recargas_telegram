@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: telegram-bot-recargas
+    runtime: python
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        fromFile: true
+        value: config.py
+      - key: ADMIN_ID
+        fromFile: true
+        value: config.py
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    plan: free
