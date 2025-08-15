@@ -36,7 +36,7 @@ bot_app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).updater(None).b
 # Registrar handlers
 # -----------------------
 bot_app.add_handler(CommandHandler("start", start))
-bot_app.add_handler(CallbackQueryHandler(button_handler, pattern="^consultar_"))
+#bot_app.add_handler(CallbackQueryHandler(button_handler, pattern="^consultar_"))
 
 # Handlers modulares
 for handler in (*lineas_handlers, *paquetes_handlers, *recargas_handlers):

@@ -61,19 +61,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-     if query.data == "atras":
-        # Volver al menú principal
-        keyboard = [
-            [InlineKeyboardButton("🔍 Consultar líneas", callback_data="consultar_lineas")],
-            [InlineKeyboardButton("💳 Gestionar recargas", callback_data="gestionar_recargas")],
-            [InlineKeyboardButton("📦 Gestionar paquetes", callback_data="gestionar_paquetes")],
-            [InlineKeyboardButton("⚙️ Gestionar líneas", callback_data="gestionar_lineas")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            text="👋 Hola, soy tu bot personal de gestión de líneas móviles.\nSelecciona una opción:",
-            reply_markup=reply_markup
-        )
+    if query.data == "atras":
+       # Volver al menú principal
+       keyboard = [
+           [InlineKeyboardButton("🔍 Consultar líneas", callback_data="consultar_lineas")],
+           [InlineKeyboardButton("💳 Gestionar recargas", callback_data="gestionar_recargas")],
+           [InlineKeyboardButton("📦 Gestionar paquetes", callback_data="gestionar_paquetes")],
+           [InlineKeyboardButton("⚙️ Gestionar líneas", callback_data="gestionar_lineas")]
+       ]
+       reply_markup = InlineKeyboardMarkup(keyboard)
+       await query.edit_message_text(
+           text="👋 Hola, soy tu bot personal de gestión de líneas móviles.\nSelecciona una opción:",
+           reply_markup=reply_markup
+       )
 
 # ----------------------------------------
 # Exportar handlers modulares
