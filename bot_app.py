@@ -19,6 +19,25 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Comando /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await es_admin(update):
+        return
+
+    keyboard = [
+        [InlineKeyboardButton("🔍 Consultar líneas", callback_data="consultar_lineas")],
+        [InlineKeyboardButton("💳 Gestionar recargas", callback_data="gestionar_recargas")],
+        [InlineKeyboardButton("📦 Gestionar paquetes", callback_data="gestionar_paquetes")],
+        [InlineKeyboardButton("⚙️ Gestionar líneas", callback_data="gestionar_lineas")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        "👋 Hola, soy tu bot personal de gestión de líneas móviles.\n"
+        "Selecciona una opción:",
+        reply_markup=reply_markup
+    )
+
 # Importar handlers
 try:
     from handlers.lineas_handler import lineas_handlers
