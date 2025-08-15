@@ -47,7 +47,9 @@ try:
         bot_app.add_handler(handler)
     for handler in paquetes_handlers:
         bot_app.add_handler(handler)
-logger.info("✅ Todos los handlers registrados") except Exception as e: logger.error(f"❌ Error al registrar handlers: {e}")
+    logger.info("✅ Todos los handlers registrados") 
+except Exception as e:
+    logger.error(f"❌ Error al registrar handlers: {e}")
     raise
 
 # Webhook: Telegram envía actualizaciones aquí
