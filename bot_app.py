@@ -1,8 +1,8 @@
 # bot_app.py
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from telegram import Update
 from telegram.ext import Application
+from telegram import Update
 import config
 
 # Importar handlers
@@ -13,18 +13,17 @@ from handlers.paquetes_handler import paquetes_handlers
 # Inicializar FastAPI
 app = FastAPI()
 
-# Crear la aplicación del bot
-bot_app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
+# ✅ Solución: Desactivar updater porque usamos webhooks
+bot_app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).updater(None).build()
 
-# Registrar todos los handlers
+# Registrar handlers
 for handler in lineas_handlers:
     bot_app.add_handler(handler)
 for handler in recargas_handlers:
     bot_app.add_handler(handler)
 for handler in paquetes_handlers:
-    bot_app.add_handler(handler)
+    bot_app.add_handler(handler)  # Asegúrate de que paquetes_handler sea un handler
 
-# Webhook: Telegram envía actualizaciones aquí
 @app.post(f"/webhook/{config.TELEGRAM_BOT_TOKEN}")
 async def webhook(update: dict):
     try:
@@ -35,7 +34,6 @@ async def webhook(update: dict):
         print(f"❌ Error: {e}")
         return JSONResponse(content={"status": "error"}, status_code=500)
 
-# Salud (opcional)
 @app.get("/")
 def health():
     return {"status": "Bot activo"}
