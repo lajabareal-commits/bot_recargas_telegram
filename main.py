@@ -1,27 +1,41 @@
 # main.py
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler
+from telegram.ext import ContextTypes
 from datetime import datetime, timedelta
 from services.database import init_db
 import config
 
-# Importar el handler
+# Handlers modularizados
 from handlers.lineas_handler import lineas_handlers, obtener_principal, cargar_lineas
 from handlers.paquetes_handler import paquetes_handlers, paquete_activo, calcular_expiracion, cargar_paquetes
 from handlers.recargas_handler import recargas_handlers, ultima_recarga, puede_recargar, cargar_recargas
 
 
-# Verificar si el usuario es el admin
+# ----------------------------------------
+# Inicialización de la base de datos
+# ----------------------------------------
+def setup():
+    """Crea las tablas si no existen."""
+    init_db()
+
+
+# ----------------------------------------
+# Verificación de admin
+# ----------------------------------------
 async def es_admin(update: Update):
     user_id = update.effective_user.id
     if user_id != config.ADMIN_ID:
-        await update.message.reply_text("No tienes permiso para usar este bot.")
+        await update.message.reply_text("❌ No tienes permiso para usar este bot.")
         return False
     return True
 
+
+# ----------------------------------------
 # Comando /start
+# ----------------------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler del comando /start"""
     if not await es_admin(update):
         return
 
@@ -39,13 +53,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup
     )
 
-# Manejador de botones generales (los que no están en handlers/)
+
+# ----------------------------------------
+# Handler de botones generales
+# ----------------------------------------
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
     if query.data == "consultar_lineas":
-
         lineas = cargar_lineas()
         principal = obtener_principal()
         recargas = cargar_recargas()
@@ -71,7 +87,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 texto += "\n"
 
-            # --- Recarga ---
+            # Recarga
             fecha_ult = ultima_recarga(numero)
             if fecha_ult:
                 texto += f"• 💳 Última recarga: `{fecha_ult}`\n"
@@ -85,7 +101,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 texto += "• 🆕 Sin recargas registradas\n"
 
-            # --- Paquetes (solo principal) ---
+            # Paquetes (solo principal)
             if es_principal:
                 texto += "• 📦 Paquetes:\n"
                 tiene_alguno = False
@@ -99,48 +115,33 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if not tiene_alguno:
                     texto += "  - ❌ Sin paquetes activos\n"
 
-            texto += "\n"  # Separador entre líneas
+            texto += "\n"
 
-        # Botón de volver
         await query.edit_message_text(
             text=texto,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Volver", callback_data="atras")]]),
             parse_mode="Markdown"
         )
 
-    elif query.data == "consultar_recargas":
-        await query.edit_message_text(text="💳 Aquí verás tus recargas (próximamente).")
+    elif query.data == "gestionar_recargas":
+        await query.edit_message_text(text="💳 Gestión de recargas (función en desarrollo).")
 
-    elif query.data == "consultar_paquetes":
-        await query.edit_message_text(text="📦 Función en desarrollo.")
-    elif query.data == "consultar_recargas":
-        await query.edit_message_text(text="💳 Aquí verás tus recargas (próximamente).")
-    # elif query.data == "consultar_paquetes":
-    #     await query.edit_message_text(text="Funcion desarrollandose")
+    elif query.data == "gestionar_paquetes":
+        await query.edit_message_text(text="📦 Gestión de paquetes (función en desarrollo).")
 
-# Función principal
-def main():
-    init_db()  # ✅ Crea las tablas si no existen
-    app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
+    elif query.data == "gestionar_lineas":
+        await query.edit_message_text(text="⚙️ Gestión de líneas (función en desarrollo).")
 
-    app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
 
-    # Comandos
-    app.add_handler(CommandHandler("start", start))
+# ----------------------------------------
+# Exportar handlers modulares
+# ----------------------------------------
+__all__ = [
+    "setup",
+    "start",
+    "button_handler",
+    "lineas_handlers",
+    "recargas_handlers",
+    "paquetes_handlers",
+]
 
-    # Botones generales
-    app.add_handler(CallbackQueryHandler(button_handler, pattern="^consultar_"))
-
-    # Handlers específicos de líneas (modularizados)
-    for handler in lineas_handlers:
-        app.add_handler(handler)
-    for handler in paquetes_handlers:
-        app.add_handler(handler)
-    for handler in recargas_handlers:
-        app.add_handler(handler)
-
-    print("Bot iniciado... Esperando comandos.")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
