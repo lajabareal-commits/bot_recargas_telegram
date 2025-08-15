@@ -1,5 +1,5 @@
 # bot_app.py
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from telegram import Update
 from telegram.ext import Application
@@ -47,10 +47,20 @@ try:
         bot_app.add_handler(handler)
     for handler in paquetes_handlers:
         bot_app.add_handler(handler)
-    logger.info("✅ Todos los handlers registrados") 
+    logger.info("✅ Todos los handlers registrados")
 except Exception as e:
     logger.error(f"❌ Error al registrar handlers: {e}")
     raise
+
+# Inicializar el bot una sola vez al arrancar la app
+@app.on_event("startup")
+async def startup_event():
+    try:
+        await bot_app.initialize()
+        logger.info("🔄 Bot inicializado en el arranque")
+    except Exception as e:
+        logger.error(f"❌ Error al inicializar el bot en startup: {e}", exc_info=True)
+        raise
 
 # Webhook: Telegram envía actualizaciones aquí
 @app.post(f"/webhook/{config.TELEGRAM_BOT_TOKEN}")
@@ -59,14 +69,11 @@ async def webhook(update: dict):
     logger.debug(f"📥 Datos recibidos: {update}")
 
     try:
-        await bot_app.initialize()
-        logger.info("🔄 Bot inicializado")
-
         # Convertir el diccionario a objeto Update
         update_obj = Update.de_json(update, bot_app.bot)
         logger.info(f"📩 Procesando update ID: {update_obj.update_id}")
 
-        # Procesar la actualización
+        # Procesar la actualización (ya inicializado en startup)
         await bot_app.process_update(update_obj)
         logger.info("✅ Update procesado correctamente")
 
@@ -81,3 +88,4 @@ async def webhook(update: dict):
 def health():
     logger.info("🟢 Health check: OK")
     return {"status": "Bot activo", "timestamp": str(__import__('datetime').datetime.now())}
+
