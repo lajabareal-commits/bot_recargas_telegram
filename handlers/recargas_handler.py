@@ -18,7 +18,7 @@ def cargar_recargas():
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute("SELECT id, numero, fecha FROM recargas ORDER BY fecha DESC")
-        recargas = cursor.fetchall()
+        recargas = cursor.fetchall()  # Con RealDictCursor, cada fila es un dict
         cursor.close()
         conn.close()
         return recargas
@@ -33,13 +33,13 @@ def ultima_recarga(numero):
         cursor = conn.cursor()
         cursor.execute(
             "SELECT fecha FROM recargas WHERE numero = %s ORDER BY fecha DESC LIMIT 1",
-            (numero,)  # ⚠️ Debe ser una tupla
+            (numero,)
         )
         row = cursor.fetchone()
         cursor.close()
         conn.close()
-        if row:
-            return row[0].isoformat()  # Devuelve string ISO
+        if row and "fecha" in row:
+            return row["fecha"].isoformat()  # ✅ Acceso por clave, no índice
         return None
     except Exception as e:
         logger.error(f"❌ Error al obtener última recarga para {numero}: {e}", exc_info=True)

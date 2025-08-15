@@ -18,7 +18,7 @@ def cargar_lineas():
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute("SELECT numero, nombre, es_principal FROM lineas ORDER BY nombre")
-        rows = cursor.fetchall()
+        rows = cursor.fetchall()  # RealDictCursor devuelve diccionarios
         cursor.close()
         conn.close()
         return [dict(row) for row in rows]
@@ -64,7 +64,7 @@ def establecer_principal(numero: str):
         logger.error(f"❌ Error estableciendo principal {numero}: {e}", exc_info=True)
         return False
 
-def eliminar_linea(numero: str):
+def eliminar_linea_db(numero: str):
     """Elimina una línea por número."""
     try:
         conn = get_db()
@@ -139,12 +139,6 @@ async def gestionar_lineas(update, context):
     keyboard.append([InlineKeyboardButton("🔙 Volver al inicio", callback_data="atras")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-
-    try:
-        if query.message.text == texto and query.message.reply_markup == reply_markup:
-            return
-    except:
-        pass
 
     await query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode="Markdown")
 
@@ -224,7 +218,7 @@ async def confirmar_eliminar(update, context):
     await query.answer()
 
     numero = query.data.replace("eliminar_", "")
-    eliminar_linea(numero)
+    eliminar_linea_db(numero)
 
     await query.edit_message_text(
         text=f"✅ Línea `{numero}` eliminada.",

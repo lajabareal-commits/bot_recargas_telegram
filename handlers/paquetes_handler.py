@@ -4,7 +4,7 @@ from services.database import get_db
 from handlers.lineas_handler import obtener_principal  # Reutilizamos la función
 from datetime import datetime, timedelta
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes, CallbackQueryHandler
+from telegram.ext import CallbackQueryHandler
 import logging
 
 logger = logging.getLogger(__name__)
@@ -63,14 +63,18 @@ def comprar_nuevo_paquete(tipo, numero):
     except Exception as e:
         logger.error(f"❌ Error comprando paquete {tipo} para {numero}: {e}", exc_info=True)
 
-# Calcular expiración
+# -------------------------------
+# Funciones de cálculo
+# -------------------------------
+
 def calcular_expiracion(fecha_compra_str, duracion_dias):
+    """Calcula fecha de expiración a partir de la fecha de compra y duración."""
     fecha_compra = datetime.strptime(fecha_compra_str, "%Y-%m-%d")
     return fecha_compra + timedelta(days=duracion_dias)
 
-# Verificar si el paquete está activo
 def paquete_activo(paquete):
-    exp = calcular_expiracion(paquete["fecha_compra"], 35)  # Todos duran 35 días
+    """Verifica si un paquete está activo."""
+    exp = calcular_expiracion(paquete["fecha_compra"], 35)
     return datetime.now().date() <= exp.date()
 
 # -------------------------------
@@ -94,23 +98,23 @@ async def gestionar_paquetes(update, context):
     texto += f"📱 Línea principal: *{principal['nombre']}* (`{principal['numero']}`)\n\n"
 
     for tipo, info in PAQUETES.items():
-        activo = None
-        for p in paquetes:
-            if p["tipo"] == tipo and paquete_activo(p):
-                activo = p
-                break
+        activo = next((p for p in paquetes if p["tipo"] == tipo and paquete_activo(p)), None)
         if activo:
-            exp = calcular_expiracion(activo["fecha_compra"], 35)
+            exp = calcular_expiracion(activo["fecha_compra"], info["duracion"])
             dias_restantes = (exp - datetime.now()).days
-            texto += f"✅ *{info['nombre']}*\n• Comprado: `{activo['fecha_compra']}`\n• Expira: `{exp.strftime('%Y-%m-%d')}` ({dias_restantes} días)\n\n"
+            texto += (
+                f"✅ *{info['nombre']}*\n"
+                f"• Comprado: `{activo['fecha_compra']}`\n"
+                f"• Expira: `{exp.strftime('%Y-%m-%d')}` ({dias_restantes} días)\n\n"
+            )
         else:
             texto += f"❌ *{info['nombre']}*: No activo\n"
 
     keyboard = [
-        [InlineKeyboardButton("🛒 Comprar 4.5GB ($240)", callback_data="comprar_datos_4_5gb")],
-        [InlineKeyboardButton("🛒 Comprar 2GB+SMS ($120)", callback_data="comprar_combo_2gb_sms")],
-        [InlineKeyboardButton("🔙 Volver al inicio", callback_data="atras")]
+        [InlineKeyboardButton(f"🛒 Comprar {info['nombre']} (${info['precio']})", callback_data=f"comprar_{tipo}")]
+        for tipo, info in PAQUETES.items()
     ]
+    keyboard.append([InlineKeyboardButton("🔙 Volver al inicio", callback_data="atras")])
 
     await query.edit_message_text(text=texto, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
@@ -138,12 +142,20 @@ async def comprar_paquete(update, context):
     comprar_nuevo_paquete(tipo, principal["numero"])
 
     await query.edit_message_text(
-        text=f"✅ Paquete *{info['nombre']}* comprado para `{principal['nombre']}`.\n📅 Fecha: `{datetime.now().strftime('%Y-%m-%d')}`\n💸 Precio: ${info['precio']}\n⏳ Vigencia: {info['duracion']} días",
+        text=(
+            f"✅ Paquete *{info['nombre']}* comprado para `{principal['nombre']}`.\n"
+            f"📅 Fecha: `{datetime.now().strftime('%Y-%m-%d')}`\n"
+            f"💸 Precio: ${info['precio']}\n"
+            f"⏳ Vigencia: {info['duracion']} días"
+        ),
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Volver", callback_data="atras")]]),
         parse_mode="Markdown"
     )
 
+# -------------------------------
 # Exportar handlers
+# -------------------------------
+
 paquetes_handlers = [
     CallbackQueryHandler(gestionar_paquetes, pattern="^gestionar_paquetes$"),
     CallbackQueryHandler(comprar_paquete, pattern="^comprar_(datos_4_5gb|combo_2gb_sms)$"),
