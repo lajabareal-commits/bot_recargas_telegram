@@ -61,77 +61,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    if query.data == "consultar_lineas":
-        lineas = cargar_lineas()
-        principal = obtener_principal()
-        recargas = cargar_recargas()
-        paquetes = cargar_paquetes()
-
-        if not lineas:
-            await query.edit_message_text(
-                text="❌ No tienes líneas registradas.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Volver", callback_data="atras")]])
-            )
-            return
-
-        texto = "📌 **Estado de Líneas**\n\n"
-
-        for linea in lineas:
-            nombre = linea['nombre']
-            numero = linea['numero']
-            es_principal = linea.get("es_principal", False)
-
-            texto += f"📱 *{nombre}* (`{numero}`)"
-            if es_principal:
-                texto += " ⭐\n"
-            else:
-                texto += "\n"
-
-            # Recarga
-            fecha_ult = ultima_recarga(numero)
-            if fecha_ult:
-                texto += f"• 💳 Última recarga: `{fecha_ult}`\n"
-                if puede_recargar(numero):
-                    texto += "• 🟢 Puedes recargar ahora\n"
-                else:
-                    dt_ult = datetime.fromisoformat(fecha_ult)
-                    proxima = dt_ult + timedelta(days=30)
-                    dias_faltan = (proxima - datetime.now()).days
-                    texto += f"• 🔴 Quedan `{dias_faltan}` días para recargar\n"
-            else:
-                texto += "• 🆕 Sin recargas registradas\n"
-
-            # Paquetes (solo principal)
-            if es_principal:
-                texto += "• 📦 Paquetes:\n"
-                tiene_alguno = False
-                for paquete in reversed(paquetes):
-                    if paquete_activo(paquete):
-                        exp = calcular_expiracion(paquete["fecha_compra"], paquete["duracion_dias"])
-                        dias_restantes = (exp - datetime.now()).days
-                        tipo = "4.5GB" if paquete["tipo"] == "datos_4_5gb" else "2GB+SMS"
-                        texto += f"  - {tipo}: expira en `{dias_restantes}` días\n"
-                        tiene_alguno = True
-                if not tiene_alguno:
-                    texto += "  - ❌ Sin paquetes activos\n"
-
-            texto += "\n"
-
+     if query.data == "atras":
+        # Volver al menú principal
+        keyboard = [
+            [InlineKeyboardButton("🔍 Consultar líneas", callback_data="consultar_lineas")],
+            [InlineKeyboardButton("💳 Gestionar recargas", callback_data="gestionar_recargas")],
+            [InlineKeyboardButton("📦 Gestionar paquetes", callback_data="gestionar_paquetes")],
+            [InlineKeyboardButton("⚙️ Gestionar líneas", callback_data="gestionar_lineas")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
-            text=texto,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Volver", callback_data="atras")]]),
-            parse_mode="Markdown"
+            text="👋 Hola, soy tu bot personal de gestión de líneas móviles.\nSelecciona una opción:",
+            reply_markup=reply_markup
         )
-
-    elif query.data == "gestionar_recargas":
-        await query.edit_message_text(text="💳 Gestión de recargas (función en desarrollo).")
-
-    elif query.data == "gestionar_paquetes":
-        await query.edit_message_text(text="📦 Gestión de paquetes (función en desarrollo).")
-
-    elif query.data == "gestionar_lineas":
-        await query.edit_message_text(text="⚙️ Gestión de líneas (función en desarrollo).")
-
 
 # ----------------------------------------
 # Exportar handlers modulares
