@@ -9,10 +9,23 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# -------------------------------
 # Tipos de paquetes
+# -------------------------------
+
 PAQUETES = {
-    "datos_4_5gb": {"nombre": "4.5 GB de datos", "precio": 240, "duracion": 35, "descripcion": "4.5 GB de datos por $240"},
-    "combo_2gb_sms": {"nombre": "2GB + 15 min + 20 SMS", "precio": 120, "duracion": 35, "descripcion": "2GB datos, 15 min y 20 SMS por $120"}
+    "datos_4_5gb": {
+        "nombre": "4.5 GB de datos",
+        "precio": 240,
+        "duracion": 35,
+        "descripcion": "4.5 GB de datos por $240"
+    },
+    "combo_2gb_sms": {
+        "nombre": "2GB + 15 min + 20 SMS",
+        "precio": 120,
+        "duracion": 35,
+        "descripcion": "2GB datos, 15 min y 20 SMS por $120"
+    }
 }
 
 # -------------------------------
@@ -68,13 +81,12 @@ def comprar_nuevo_paquete(tipo, numero):
 # -------------------------------
 
 def calcular_expiracion(fecha_compra_str, duracion_dias):
-    """Calcula fecha de expiración a partir de la fecha de compra y duración."""
     fecha_compra = datetime.strptime(fecha_compra_str, "%Y-%m-%d")
     return fecha_compra + timedelta(days=duracion_dias)
 
 def paquete_activo(paquete):
-    """Verifica si un paquete está activo."""
-    exp = calcular_expiracion(paquete["fecha_compra"], 35)
+    duracion = PAQUETES[paquete["tipo"]]["duracion"]
+    exp = calcular_expiracion(paquete["fecha_compra"], duracion)
     return datetime.now().date() <= exp.date()
 
 # -------------------------------
@@ -98,7 +110,7 @@ async def gestionar_paquetes(update, context):
     texto += f"📱 Línea principal: *{principal['nombre']}* (`{principal['numero']}`)\n\n"
 
     for tipo, info in PAQUETES.items():
-        activo = next((p for p in paquetes if p["tipo"] == tipo and paquete_activo(p)), None)
+        activo = next((p for p in paquetes if p["tipo"] == tipo and p["numero"] == principal["numero"] and paquete_activo(p)), None)
         if activo:
             exp = calcular_expiracion(activo["fecha_compra"], info["duracion"])
             dias_restantes = (exp - datetime.now()).days
@@ -111,10 +123,10 @@ async def gestionar_paquetes(update, context):
             texto += f"❌ *{info['nombre']}*: No activo\n"
 
     keyboard = [
-        [InlineKeyboardButton(f"🛒 Comprar {info['nombre']} (${info['precio']})", callback_data=f"comprar_{tipo}")]
-        for tipo, info in PAQUETES.items()
+        [InlineKeyboardButton("🛒 Comprar 4.5GB ($240)", callback_data="comprar_datos_4_5gb")],
+        [InlineKeyboardButton("🛒 Comprar 2GB+SMS ($120)", callback_data="comprar_combo_2gb_sms")],
+        [InlineKeyboardButton("🔙 Volver al inicio", callback_data="atras")]
     ]
-    keyboard.append([InlineKeyboardButton("🔙 Volver al inicio", callback_data="atras")])
 
     await query.edit_message_text(text=texto, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
