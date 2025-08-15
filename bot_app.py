@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 try:
     from handlers.lineas_handler import lineas_handlers
     from handlers.recargas_handler import recargas_handlers
-    from handlers.paquetes_handler import paquetes_handler
+    from handlers.paquetes_handler import paquetes_handlers
     logger.info("✅ Handlers importados correctamente")
 except Exception as e:
     logger.error(f"❌ Error al importar handlers: {e}")
