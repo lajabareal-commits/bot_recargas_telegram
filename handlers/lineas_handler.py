@@ -3,6 +3,9 @@
 from services.database import get_db
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes, CallbackQueryHandler, MessageHandler, filters
+from datetime import datetime, timedelta
+from handlers.recargas_handler import ultima_recarga, puede_recargar, cargar_recargas
+from handlers.paquetes_handler import cargar_paquetes, paquete_activo, calcular_expiracion
 import config
 import logging
 
