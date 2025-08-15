@@ -1,7 +1,7 @@
 # handlers/lineas_handler.py
 
 from services.database import get_db
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes, CallbackQueryHandler, MessageHandler, filters
 import config
 import logging
