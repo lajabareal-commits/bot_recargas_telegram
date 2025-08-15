@@ -1,4 +1,3 @@
-# bot_app.py
 from contextlib import asynccontextmanager
 import os
 import sys
@@ -6,8 +5,8 @@ import logging
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from telegram import Update
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, ContextTypes
 
 import config
 
@@ -18,6 +17,15 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
+
+# Función temporal para validar admin (puedes reemplazarla con tu lógica real)
+async def es_admin(update: Update) -> bool:
+    # Ejemplo: solo el usuario con ID igual a config.ADMIN_ID puede usar /start
+    if update.effective_user and update.effective_user.id == config.ADMIN_ID:
+        return True
+    else:
+        logger.warning(f"Usuario {update.effective_user.id} no autorizado para usar /start")
+        return False
 
 # Comando /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -64,7 +72,7 @@ except Exception as e:
 # Registrar el comando /start
 bot_app.add_handler(CommandHandler("start", start))
 
-# Registrar handlers
+# Registrar handlers adicionales
 try:
     for handler in (*lineas_handlers, *recargas_handlers, *paquetes_handlers):
         bot_app.add_handler(handler)
