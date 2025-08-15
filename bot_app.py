@@ -1,21 +1,22 @@
 # bot_app.py
-from fastapi import FastAPI
+from contextlib import asynccontextmanager
+import os
+import sys
+import logging
+
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from telegram import Update
 from telegram.ext import Application
-import config
-import logging
-import sys
 
-# Configurar logging para ver todo en los logs de Render
+import config
+
+# Logging a consola (Render capta stdout)
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)  # Enviar logs a la consola (y a Render)
-    ]
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
-
 logger = logging.getLogger(__name__)
 
 # Importar handlers
@@ -28,12 +29,14 @@ except Exception as e:
     logger.error(f"❌ Error al importar handlers: {e}")
     raise
 
-# Inicializar FastAPI
-app = FastAPI()
-
-# Crear la aplicación del bot
+# Crear la aplicación del bot (modo webhook => updater(None))
 try:
-    bot_app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).updater(None).build()
+    bot_app = (
+        Application.builder()
+        .token(config.TELEGRAM_BOT_TOKEN)
+        .updater(None)
+        .build()
+    )
     logger.info("✅ Aplicación del bot creada")
 except Exception as e:
     logger.error(f"❌ Error al crear la aplicación del bot: {e}")
@@ -41,51 +44,68 @@ except Exception as e:
 
 # Registrar handlers
 try:
-    for handler in lineas_handlers:
-        bot_app.add_handler(handler)
-    for handler in recargas_handlers:
-        bot_app.add_handler(handler)
-    for handler in paquetes_handlers:
+    for handler in (*lineas_handlers, *recargas_handlers, *paquetes_handlers):
         bot_app.add_handler(handler)
     logger.info("✅ Todos los handlers registrados")
 except Exception as e:
     logger.error(f"❌ Error al registrar handlers: {e}")
     raise
 
-# Inicializar el bot una sola vez al arrancar la app
-@app.on_event("startup")
-async def startup_event():
+# Constantes de webhook
+WEBHOOK_PATH = f"/webhook/{config.TELEGRAM_BOT_TOKEN}"
+PUBLIC_URL = os.getenv("RENDER_EXTERNAL_URL", getattr(config, "PUBLIC_URL", None))
+WEBHOOK_URL = f"{PUBLIC_URL}{WEBHOOK_PATH}" if PUBLIC_URL else None
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Arranca/parada de PTB y (si se puede) fija el webhook al iniciar."""
+    logger.info("🚀 Startup FastAPI: inicializando PTB…")
+    await bot_app.initialize()
+    await bot_app.start()
+    logger.info("✅ PTB iniciado")
+
+    if WEBHOOK_URL:
+        try:
+            await bot_app.bot.set_webhook(
+                url=WEBHOOK_URL,
+                allowed_updates=Update.ALL_TYPES,
+            )
+            logger.info(f"🌐 Webhook configurado: {WEBHOOK_URL}")
+        except Exception as e:
+            logger.error(f"⚠️ No se pudo configurar el webhook: {e}", exc_info=True)
+
     try:
-        await bot_app.initialize()
-        logger.info("🔄 Bot inicializado en el arranque")
-    except Exception as e:
-        logger.error(f"❌ Error al inicializar el bot en startup: {e}", exc_info=True)
-        raise
+        yield
+    finally:
+        logger.info("🛑 Shutdown FastAPI: deteniendo PTB…")
+        try:
+            await bot_app.stop()
+            logger.info("✅ PTB detenido")
+        except Exception as e:
+            logger.error(f"⚠️ Error al detener PTB: {e}", exc_info=True)
 
-# Webhook: Telegram envía actualizaciones aquí
-@app.post(f"/webhook/{config.TELEGRAM_BOT_TOKEN}")
-async def webhook(update: dict):
-    logger.info("📩 Webhook: Solicitud recibida")
-    logger.debug(f"📥 Datos recibidos: {update}")
+# Inicializar FastAPI con ciclo de vida
+app = FastAPI(lifespan=lifespan)
 
+# Endpoint del webhook (Telegram POSTea aquí)
+@app.post(WEBHOOK_PATH)
+async def telegram_webhook(request: Request):
+    logger.info("📩 Webhook: solicitud recibida")
     try:
-        # Convertir el diccionario a objeto Update
-        update_obj = Update.de_json(update, bot_app.bot)
-        logger.info(f"📩 Procesando update ID: {update_obj.update_id}")
-
-        # Procesar la actualización (ya inicializado en startup)
+        payload = await request.json()
+        update_obj = Update.de_json(payload, bot_app.bot)
+        logger.info(f"🔎 Procesando update ID: {update_obj.update_id}")
         await bot_app.process_update(update_obj)
-        logger.info("✅ Update procesado correctamente")
-
+        logger.info("✅ Update procesado")
         return JSONResponse(content={"status": "ok"})
-
     except Exception as e:
         logger.error(f"❌ Error procesando el update: {e}", exc_info=True)
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
-# Ruta de salud
+# Health check
 @app.get("/")
 def health():
     logger.info("🟢 Health check: OK")
-    return {"status": "Bot activo", "timestamp": str(__import__('datetime').datetime.now())}
+    from datetime import datetime
+    return {"status": "Bot activo", "timestamp": str(datetime.now())}
 
