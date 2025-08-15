@@ -361,7 +361,7 @@ lineas_handlers = [
     CallbackQueryHandler(elegir_principal, pattern="^elegir_principal$"),
     CallbackQueryHandler(confirmar_principal, pattern="^principal_\\d+$"),
     CallbackQueryHandler(volver_atras, pattern="^atras$"),
-    CallbackQueryHandler(mostrar_estado_lineas, pattern="^consultar_lineas$")
+    CallbackQueryHandler(mostrar_estado_lineas, pattern="^consultar_lineas$"),
     MessageHandler(filters.TEXT & filters.User(user_id=config.ADMIN_ID), recibir_linea),
 ]
 
