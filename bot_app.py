@@ -7,7 +7,7 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from telegram import Update
-from telegram.ext import Application
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler
 
 import config
 
@@ -60,6 +60,9 @@ try:
 except Exception as e:
     logger.error(f"❌ Error al crear la aplicación del bot: {e}")
     raise
+
+# Registrar el comando /start
+bot_app.add_handler(CommandHandler("start", start))
 
 # Registrar handlers
 try:
