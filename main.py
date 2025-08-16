@@ -7,9 +7,10 @@ from services.database import init_db
 import config
 
 # Handlers modularizados
-from handlers.lineas_handler import lineas_handlers, obtener_principal, cargar_lineas
+from handlers.lineas_handler import lineas_handlers, cargar_lineas
 from handlers.paquetes_handler import paquetes_handlers, paquete_activo, calcular_expiracion, cargar_paquetes
 from handlers.recargas_handler import recargas_handlers, ultima_recarga, puede_recargar, cargar_recargas
+from services.utils import obtener_principal
 
 
 # ----------------------------------------

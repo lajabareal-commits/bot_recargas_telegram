@@ -1,7 +1,7 @@
 # handlers/paquetes_handler.py
 
 from services.database import get_db
-from handlers.lineas_handler import obtener_principal  # Reutilizamos la función
+from services.utils import obtener_principal  # Reutilizamos la función
 from datetime import datetime, timedelta
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackQueryHandler

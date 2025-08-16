@@ -6,6 +6,7 @@ from telegram.ext import ContextTypes, CallbackQueryHandler, MessageHandler, fil
 from datetime import datetime, timedelta
 from handlers.recargas_handler import ultima_recarga, puede_recargar, cargar_recargas
 from handlers.paquetes_handler import cargar_paquetes, paquete_activo, calcular_expiracion
+from services.utils import obtener_principal
 import config
 import logging
 
@@ -79,20 +80,6 @@ def eliminar_linea_db(numero: str):
         logger.info(f"🗑️ Línea {numero} eliminada")
     except Exception as e:
         logger.error(f"❌ Error eliminando línea {numero}: {e}", exc_info=True)
-
-def obtener_principal():
-    """Devuelve la línea principal, o None si no hay."""
-    try:
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute("SELECT numero, nombre FROM lineas WHERE es_principal = TRUE")
-        row = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        return dict(row) if row else None
-    except Exception as e:
-        logger.error(f"❌ Error obteniendo línea principal: {e}", exc_info=True)
-        return None
 
 # -------------------------------
 # Menús
