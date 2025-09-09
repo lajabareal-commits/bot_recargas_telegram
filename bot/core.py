@@ -7,7 +7,7 @@ from database.connection import init_db  # <-- NUEVO
 
 class TelegramBot:
     def __init__(self):
-        self.application = Application.builder().token(TELEGRAM_TOKEN).build()
+        self.application = Application.builder().token(TELEGRAM_TOKEN).updater(None).build()
         init_db()  # <-- NUEVO: Inicializa la DB al arrancar
         self.load_modules()
 
