@@ -1,5 +1,4 @@
 # bot_app.py
-
 import os
 import sys
 import logging
@@ -9,13 +8,10 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from telegram import Update
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from telegram.ext import Application
 
 import config
-from main import setup, start, button_handler
-from handlers.lineas_handler import lineas_handlers
-from handlers.paquetes_handler import paquetes_handlers
-from handlers.recargas_handler import recargas_handlers
+from bot.core import TelegramBot  # <-- Aquí está toda tu lógica modular
 
 # -----------------------
 # Configurar logging
@@ -30,22 +26,23 @@ logger = logging.getLogger(__name__)
 # -----------------------
 # Crear aplicación del bot
 # -----------------------
-bot_app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).updater(None).build()
+bot_app = Application.builder().token(config.TELEGRAM_TOKEN).updater(None).build()
 
 # -----------------------
-# Registrar handlers
+# Inicializar tu sistema modular
 # -----------------------
-bot_app.add_handler(CommandHandler("start", start))
-#bot_app.add_handler(CallbackQueryHandler(button_handler, pattern="^consultar_"))
-
-# Handlers modulares
-for handler in (*lineas_handlers, *paquetes_handlers, *recargas_handlers):
-    bot_app.add_handler(handler)
+# Creamos una instancia de TelegramBot, que automáticamente:
+# - Carga todos los módulos en /modules
+# - Registra sus handlers
+# - Inicializa la base de datos
+telegram_bot = TelegramBot()
+# Reutilizamos la aplicación que ya configuró tu clase
+bot_app = telegram_bot.application  # <-- ¡Aquí está toda la magia modular!
 
 # -----------------------
 # Configurar webhook
 # -----------------------
-WEBHOOK_PATH = f"/webhook/{config.TELEGRAM_BOT_TOKEN}"
+WEBHOOK_PATH = f"/webhook/{config.TELEGRAM_TOKEN}"
 PUBLIC_URL = os.getenv("RENDER_EXTERNAL_URL", getattr(config, "PUBLIC_URL", None))
 WEBHOOK_URL = f"{PUBLIC_URL}{WEBHOOK_PATH}" if PUBLIC_URL else None
 
@@ -59,12 +56,8 @@ async def lifespan(app: FastAPI):
     await bot_app.start()
     logger.info("✅ PTB iniciado")
 
-    # Inicializar base de datos
-    try:
-        setup()  # setup() llama init_db() de main.py
-        logger.info("✅ Base de datos inicializada")
-    except Exception as e:
-        logger.error(f"❌ Error inicializando DB: {e}", exc_info=True)
+    # La DB ya se inicializa en TelegramBot.__init__(), pero si quieres log adicional:
+    logger.info("✅ Base de datos ya inicializada por TelegramBot")
 
     # Configurar webhook
     if WEBHOOK_URL:
@@ -115,4 +108,3 @@ def health():
     from datetime import datetime
     logger.info("🟢 Health check: OK")
     return {"status": "Bot activo", "timestamp": str(datetime.now())}
-
