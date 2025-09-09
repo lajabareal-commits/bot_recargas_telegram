@@ -49,14 +49,17 @@ async def registrar_recarga(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text=texto, reply_markup=reply_markup)
         return
 
-    texto = "📲 *Elige la línea a la que deseas registrar una recarga:*"
+    # 🔄 AÑADIR UN "ESCAPED ZERO-WIDTH SPACE" PARA FORZAR CAMBIO
+    # Esto es invisible pero hace que el mensaje sea "diferente"
+    texto = "📲 *Elige la línea a la que deseas registrar una recarga:*\u200b"  # ← ¡Añadido \u200b!
+
     keyboard = []
     for linea in lineas:
         linea_id, numero, alias = linea
         nombre_mostrar = f"{alias or 'Sin alias'} ({numero})"
         keyboard.append([InlineKeyboardButton(nombre_mostrar, callback_data=f'elegir_linea_{linea_id}')])
 
-    keyboard.append([InlineKeyboardButton("⬅️ Volver", callback_data='registrar_recarga')])
+    keyboard.append([InlineKeyboardButton("⬅️ Volver", callback_data='menu_gestion_recargas')])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode="Markdown")
