@@ -1,0 +1,33 @@
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Archivos de configuración local
+.env
+*.env
+
+# Archivos de logs
+*.log
+
+# Archivos temporales
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.ipynb_checkpoints/
+
+# IDE (PyCharm)
+.idea/
+.vscode/
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Render / FastAPI
+instance/
+
+# Base de datos local (si usas SQLite)
+*.sqlite3
