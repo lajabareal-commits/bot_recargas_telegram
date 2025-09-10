@@ -18,7 +18,7 @@ async def enviar_mensaje(bot, chat_id, texto):
     except Exception as e:
         logger.error(f"❌ Error al enviar mensaje a {chat_id}: {e}")
 
-async def verificar_y_notificar():
+async def verificar_y_notificar(bot_app.bot):
     bot = Bot(token=TELEGRAM_TOKEN)
     hoy = date.today()
     umbral_dias = 3

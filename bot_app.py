@@ -110,7 +110,7 @@ async def trigger_notificaciones_manual(request: Request):
     logger.info("📩 [CRON] Trigger recibido para enviar notificaciones")
     try:
         # Llamamos a la función de notificaciones
-        await verificar_y_notificar(bot_app.bot, config.TELEGRAM_TOKEN)
+        await verificar_y_notificar(bot_app.bot)
         logger.info("✅ [CRON] Notificaciones enviadas correctamente")
         return JSONResponse(content={"status": "ok", "message": "Notificaciones enviadas"})
     except Exception as e:
