@@ -12,6 +12,7 @@ from telegram.ext import Application
 
 import config
 from bot.core import TelegramBot  # <-- Aquí está toda tu lógica modular
+from notificaciones import verificar_y_notificar
 
 # -----------------------
 # Configurar logging
@@ -98,6 +99,22 @@ async def telegram_webhook(request: Request):
         return JSONResponse(content={"status": "ok"})
     except Exception as e:
         logger.error(f"❌ Error procesando el update: {e}", exc_info=True)
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
+
+#------------------------
+# Endpint cron-job para notificaciones
+#------------------------
+@app.post("/trigger-notificaciones")
+async def trigger_notificaciones_manual(request: Request):
+    """Endpoint para que cron-job.org dispare las notificaciones diarias."""
+    logger.info("📩 [CRON] Trigger recibido para enviar notificaciones")
+    try:
+        # Llamamos a la función de notificaciones
+        await verificar_y_notificar(bot_app.bot, config.TELEGRAM_TOKEN)
+        logger.info("✅ [CRON] Notificaciones enviadas correctamente")
+        return JSONResponse(content={"status": "ok", "message": "Notificaciones enviadas"})
+    except Exception as e:
+        logger.error(f"❌ [CRON] Error al enviar notificaciones: {e}", exc_info=True)
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
 # -----------------------
