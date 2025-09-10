@@ -3,6 +3,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from database.connection import get_db_connection
 from utils.auth import is_user_authorized
+from modules.start import mostrar_menu_inicio
 
 # Estados para el flujo de agregar línea (usaremos el contexto del usuario)
 ESTADO_AGREGAR_NUMERO = "agregar_numero"
@@ -188,33 +189,7 @@ async def confirmar_eliminar_linea(update: Update, context: ContextTypes.DEFAULT
 
 async def volver_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Vuelve al menú principal (/start)."""
-    query = update.callback_query
-    await query.answer()
-
-    user = update.effective_user
-
-    # 🎨 Mensaje de bienvenida
-    mensaje = (
-        f"👋 ¡Hola {user.first_name}!\n\n"
-        f"🌟 Bienvenido a tu asistente de gestión móvil.\n"
-        f"Aquí podrás controlar todo lo relacionado con tus líneas, recargas y paquetes.\n\n"
-        f"👇 Elige una opción para comenzar:"
-    )
-
-    # 🔘 Creamos los botones en dos filas
-    keyboard = [
-        [
-            InlineKeyboardButton("📱 Consultar Líneas", callback_data='consultar_lineas'),
-            InlineKeyboardButton("📋 Gestionar Líneas", callback_data='gestionar_lineas')
-        ],
-        [
-            InlineKeyboardButton("💳 Gestionar Recargas", callback_data='gestionar_recargas'),
-            InlineKeyboardButton("📦 Gestionar Paquetes", callback_data='gestionar_paquetes')
-        ]
-    ]
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(text=mensaje, reply_markup=reply_markup, parse_mode="Markdown")
+    await mostrar_menu_inicio(update, context)
 
 async def volver_menu_gestion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Vuelve al menú de gestión de líneas."""

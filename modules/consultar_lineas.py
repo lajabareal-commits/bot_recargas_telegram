@@ -3,6 +3,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackQueryHandler, ContextTypes
 from database.connection import get_db_connection
 from datetime import date
+from modules.start import mostrar_menu_inicio
 
 # Número de líneas por página (para navegación)
 LINEAS_POR_PAGINA = 1  # Mostramos 1 línea a la vez para darle espacio y detalle
@@ -175,30 +176,7 @@ async def navegar_linea_siguiente(update: Update, context: ContextTypes.DEFAULT_
 async def volver_start_consulta(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Vuelve al menú principal (/start)."""
     query = update.callback_query
-    await query.answer()
-
-    user = update.effective_user
-
-    mensaje = (
-        f"👋 ¡Hola {user.first_name}!\n\n"
-        f"🌟 Bienvenido a tu asistente de gestión móvil.\n"
-        f"Aquí podrás controlar todo lo relacionado con tus líneas, recargas y paquetes.\n\n"
-        f"👇 Elige una opción para comenzar:"
-    )
-
-    keyboard = [
-        [
-            InlineKeyboardButton("📱 Consultar Líneas", callback_data='consultar_lineas'),
-            InlineKeyboardButton("📋 Gestionar Líneas", callback_data='gestionar_lineas')
-        ],
-        [
-            InlineKeyboardButton("💳 Gestionar Recargas", callback_data='gestionar_recargas'),
-            InlineKeyboardButton("📦 Gestionar Paquetes", callback_data='gestionar_paquetes')
-        ]
-    ]
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(text=mensaje, reply_markup=reply_markup, parse_mode="Markdown")
+    await mostrar_menu_inicio(update, context)
 
 def register_handlers(application):
     application.add_handler(CallbackQueryHandler(mostrar_consulta_lineas, pattern='^consultar_lineas$'))

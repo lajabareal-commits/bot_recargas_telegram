@@ -41,6 +41,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         finally:
             conn.close()
 
+    # 🎨 Generar y enviar el mensaje de inicio con resumen
+    await mostrar_menu_inicio(update, context)  # <-- NUEVO: llamamos a la función
+
+async def mostrar_menu_inicio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Genera y muestra el menú principal con panel de resumen."""
+    user = update.effective_user
+
+
     # 📊 Obtener datos para el panel de resumen
     resumen = await generar_panel_resumen(user.id)
 
@@ -65,7 +73,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(mensaje, reply_markup=reply_markup, parse_mode="Markdown")
+
+
+    if update.message:  # Si viene de /start
+        await update.message.reply_text(mensaje, reply_markup=reply_markup, parse_mode="Markdown")
+    elif update.callback_query:  # Si viene de un botón "Volver"
+        query = update.callback_query
+        await query.answer()
+        # Añadimos \u200b para evitar "Message is not modified"
+        await query.edit_message_text(text=mensaje + "\u200b", reply_markup=reply_markup, parse_mode="Markdown")
+
 
 async def generar_panel_resumen(user_id):
     """Genera un string con el panel de resumen para el usuario."""

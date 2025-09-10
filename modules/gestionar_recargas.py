@@ -4,6 +4,7 @@ from telegram.ext import CallbackQueryHandler, ContextTypes
 from database.connection import get_db_connection
 from datetime import date
 import calendar
+from modules.start import mostrar_menu_inicio
 
 # Estados (ya no usamos el de texto, todo será con callbacks)
 ESTADO_ELEGIR_AÑO = "elegir_año"
@@ -306,31 +307,7 @@ async def ver_proximas_recargas(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def volver_start_recargas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Vuelve al menú principal (/start)."""
-    query = update.callback_query
-    await query.answer()
-
-    user = update.effective_user
-
-    mensaje = (
-        f"👋 ¡Hola {user.first_name}!\n\n"
-        f"🌟 Bienvenido a tu asistente de gestión móvil.\n"
-        f"Aquí podrás controlar todo lo relacionado con tus líneas, recargas y paquetes.\n\n"
-        f"👇 Elige una opción para comenzar:"
-    )
-
-    keyboard = [
-        [
-            InlineKeyboardButton("📱 Consultar Líneas", callback_data='consultar_lineas'),
-            InlineKeyboardButton("📋 Gestionar Líneas", callback_data='gestionar_lineas')
-        ],
-        [
-            InlineKeyboardButton("💳 Gestionar Recargas", callback_data='gestionar_recargas'),
-            InlineKeyboardButton("📦 Gestionar Paquetes", callback_data='gestionar_paquetes')
-        ]
-    ]
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(text=mensaje, reply_markup=reply_markup, parse_mode="Markdown")
+    await mostrar_menu_inicio(update, context)
 
 async def volver_menu_recargas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Vuelve al menú de gestión de recargas."""
