@@ -2,9 +2,9 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackQueryHandler, ContextTypes
 from database.connection import get_db_connection
-from modules.start import mostrar_menu_inicio
 from datetime import date, timedelta
 import calendar
+import re
 
 # Definición de paquetes (ID, Descripción, Precio)
 PAQUETES = [
@@ -23,51 +23,56 @@ ESTADO_ELEGIR_AÑO_PAQUETE = "elegir_año_paquete"
 ESTADO_ELEGIR_MES_PAQUETE = "elegir_mes_paquete"
 ESTADO_ELEGIR_DIA_PAQUETE = "elegir_dia_paquete"
 
-def determinar_tipo_recurso(tipo_paquete: str) -> str:
-    """Determina el tipo principal de recurso del paquete."""
-    tipo_paquete = tipo_paquete.lower()
-    if "gb" in tipo_paquete and ("min" in tipo_paquete or "sms" in tipo_paquete):
-        return "combinado"
-    elif "gb" in tipo_paquete:
-        return "datos"
-    elif "min" in tipo_paquete:
-        return "minutos"
-    elif "sms" in tipo_paquete:
-        return "sms"
-    else:
-        return "otros"
+async def extraer_recursos_de_paquete(tipo_paquete: str) -> list:
+    """Extrae recursos individuales (GB, min, SMS) de un paquete."""
+    recursos = []
+    tipo_lower = tipo_paquete.lower()
 
-async def desactivar_paquetes_anteriores(linea_id: int, tipo_nuevo: str, conn):
-    """Desactiva paquetes anteriores del mismo tipo de recurso."""
-    tipo_nuevo = tipo_nuevo.lower()
+    # Extraer GB
+    if "gb" in tipo_lower:
+        match_gb = re.search(r'(\d+\.?\d*)\s*gb', tipo_lower)
+        if match_gb:
+            recursos.append(('datos', float(match_gb.group(1))))
 
-    # Mapeo: qué tipos se afectan entre sí
-    tipos_afectados = {
-        "combinado": ["combinado", "datos", "minutos", "sms"],
-        "datos": ["combinado", "datos"],
-        "minutos": ["combinado", "minutos"],
-        "sms": ["combinado", "sms"],
-    }
+    # Extraer minutos
+    if "min" in tipo_lower:
+        match_min = re.search(r'(\d+\.?\d*)\s*min', tipo_lower)
+        if match_min:
+            recursos.append(('minutos', float(match_min.group(1))))
 
-    tipos_a_desactivar = tipos_afectados.get(tipo_nuevo, [tipo_nuevo])
+    # Extraer SMS
+    if "sms" in tipo_lower:
+        match_sms = re.search(r'(\d+\.?\d*)\s*sms', tipo_lower)
+        if match_sms:
+            recursos.append(('sms', float(match_sms.group(1))))
 
+    return recursos
+
+async def registrar_recursos(linea_id: int, recursos: list, fecha_compra: date, conn, tipo_paquete: str):
+    """Registra o actualiza recursos individuales para una línea."""
+    vencimiento = fecha_compra + timedelta(days=DIAS_VIGENCIA)
     cur = conn.cursor()
+
     try:
-        for tipo in tipos_a_desactivar:
+        for tipo, cantidad in recursos:
+            # Desactivar recursos anteriores del mismo tipo
             cur.execute("""
-                UPDATE paquetes
+                UPDATE recursos_linea
                 SET activo = FALSE
-                WHERE linea_id = %s AND activo = TRUE AND (
-                    (%s = 'combinado' AND (tipo_paquete ILIKE '%%gb%%' OR tipo_paquete ILIKE '%%min%%' OR tipo_paquete ILIKE '%%sms%%'))
-                    OR (%s = 'datos' AND tipo_paquete ILIKE '%%gb%%' AND tipo_paquete NOT ILIKE '%%min%%' AND tipo_paquete NOT ILIKE '%%sms%%')
-                    OR (%s = 'minutos' AND tipo_paquete ILIKE '%%min%%' AND tipo_paquete NOT ILIKE '%%gb%%' AND tipo_paquete NOT ILIKE '%%sms%%')
-                    OR (%s = 'sms' AND tipo_paquete ILIKE '%%sms%%' AND tipo_paquete NOT ILIKE '%%gb%%' AND tipo_paquete NOT ILIKE '%%min%%')
-                )
-            """, (linea_id, tipo, tipo, tipo, tipo))
+                WHERE linea_id = %s AND tipo_recurso = %s AND activo = TRUE
+            """, (linea_id, tipo))
+
+            # Insertar nuevo recurso
+            cur.execute("""
+                INSERT INTO recursos_linea (linea_id, tipo_recurso, cantidad, fecha_activacion, fecha_vencimiento, origen_paquete)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (linea_id, tipo, cantidad, fecha_compra, vencimiento, tipo_paquete))
+
         conn.commit()
     except Exception as e:
-        print(f"Error al desactivar paquetes anteriores: {e}")
+        print(f"Error al registrar recursos: {e}")
         conn.rollback()
+        raise e
     finally:
         cur.close()
 
@@ -78,7 +83,6 @@ async def mostrar_menu_gestion_paquetes(update: Update, context: ContextTypes.DE
 
     user_id = update.effective_user.id
 
-    # Verificar si tiene una línea principal
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("SELECT id FROM lineas WHERE propietario_id = %s AND es_principal = TRUE AND activa = TRUE", (user_id,))
@@ -96,7 +100,7 @@ async def mostrar_menu_gestion_paquetes(update: Update, context: ContextTypes.DE
         texto = "📦 *Menú de Gestión de Paquetes*\nElige una opción:\u200b"
         keyboard = [
             [InlineKeyboardButton("➕ Comprar Nuevo Paquete", callback_data='comprar_paquete')],
-            [InlineKeyboardButton("📅 Ver Paquetes Activos", callback_data='ver_paquetes_activos')],
+            [InlineKeyboardButton("📅 Ver Recursos Activos", callback_data='ver_paquetes_activos')],
             [InlineKeyboardButton("📲 Cambiar Línea Principal", callback_data='seleccionar_linea_principal')],
             [InlineKeyboardButton("⬅️ Volver al inicio", callback_data='volver_start_paquetes')]
         ]
@@ -150,9 +154,7 @@ async def set_linea_principal(update: Update, context: ContextTypes.DEFAULT_TYPE
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        # Primero, desmarcar todas las líneas como principales
         cur.execute("UPDATE lineas SET es_principal = FALSE WHERE propietario_id = %s", (user_id,))
-        # Luego, marcar esta como principal
         cur.execute("UPDATE lineas SET es_principal = TRUE WHERE id = %s", (linea_id,))
         conn.commit()
         mensaje = "✅ ¡Línea marcada como principal!\u200b"
@@ -178,7 +180,6 @@ async def comprar_paquete(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = update.effective_user.id
 
-    # Obtener línea principal
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("SELECT id, numero_linea, nombre_alias FROM lineas WHERE propietario_id = %s AND es_principal = TRUE AND activa = TRUE", (user_id,))
@@ -238,7 +239,7 @@ async def elegir_paquete(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ▼▼▼ REUTILIZAMOS LÓGICA DE FECHAS (con prefijos para paquetes) ▼▼▼
 
 async def usar_fecha_actual_paquete(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Registra el paquete con fecha de hoy."""
+    """Registra los recursos del paquete con fecha de hoy."""
     query = update.callback_query
     await query.answer()
 
@@ -250,30 +251,18 @@ async def usar_fecha_actual_paquete(update: Update, context: ContextTypes.DEFAUL
         return
 
     hoy = date.today()
-    vencimiento = hoy + timedelta(days=DIAS_VIGENCIA)
+    recursos = await extraer_recursos_de_paquete(paquete[1])
 
-    # Guardar en DB
     conn = get_db_connection()
     try:
-        # Determinar tipo y desactivar anteriores
-        tipo_recurso = determinar_tipo_recurso(paquete[1])
-        await desactivar_paquetes_anteriores(linea_id, tipo_recurso, conn)
-
-        # Insertar nuevo paquete
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO paquetes (linea_id, tipo_paquete, precio, fecha_compra, fecha_vencimiento)
-            VALUES (%s, %s, %s, %s, %s)
-        """, (linea_id, paquete[1], paquete[2], hoy, vencimiento))
-        conn.commit()
-        mensaje = f"✅ ¡Paquete registrado!\nCompra: {hoy.strftime('%d/%m/%Y')}\nVence: {vencimiento.strftime('%d/%m/%Y')}"
+        await registrar_recursos(linea_id, recursos, hoy, conn, paquete[1])
+        mensaje = f"✅ ¡Recursos registrados!\nActivados desde: {hoy.strftime('%d/%m/%Y')}\nVigencia: 35 días."
     except Exception as e:
-        print(f"Error al registrar paquete: {e}")
-        mensaje = "❌ Error al registrar paquete."
+        print(f"Error al registrar recursos: {e}")
+        mensaje = "❌ Error al registrar recursos."
     finally:
         conn.close()
 
-    # Limpiar
     context.user_data.pop('paquete_seleccionado', None)
     context.user_data.pop('linea_id_paquete', None)
 
@@ -368,7 +357,7 @@ async def seleccionar_mes_paquete(update: Update, context: ContextTypes.DEFAULT_
     )
 
 async def seleccionar_dia_paquete(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Paso 4: Guarda el día, forma la fecha y registra el paquete."""
+    """Registra los recursos del paquete con fecha manual."""
     query = update.callback_query
     await query.answer()
 
@@ -380,32 +369,22 @@ async def seleccionar_dia_paquete(update: Update, context: ContextTypes.DEFAULT_
 
     try:
         fecha_compra = date(año, mes, dia)
-        fecha_vencimiento = fecha_compra + timedelta(days=DIAS_VIGENCIA)
     except ValueError:
         await query.edit_message_text("❌ Fecha inválida.\u200b")
         return
 
+    recursos = await extraer_recursos_de_paquete(paquete[1])
+
     conn = get_db_connection()
     try:
-        # Determinar tipo y desactivar anteriores
-        tipo_recurso = determinar_tipo_recurso(paquete[1])
-        await desactivar_paquetes_anteriores(linea_id, tipo_recurso, conn)
-
-        # Insertar nuevo paquete
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO paquetes (linea_id, tipo_paquete, precio, fecha_compra, fecha_vencimiento)
-            VALUES (%s, %s, %s, %s, %s)
-        """, (linea_id, paquete[1], paquete[2], fecha_compra, fecha_vencimiento))
-        conn.commit()
-        mensaje = f"✅ ¡Paquete registrado!\nCompra: {fecha_compra.strftime('%d/%m/%Y')}\nVence: {fecha_vencimiento.strftime('%d/%m/%Y')}"
+        await registrar_recursos(linea_id, recursos, fecha_compra, conn, paquete[1])
+        mensaje = f"✅ ¡Recursos registrados!\nActivados desde: {fecha_compra.strftime('%d/%m/%Y')}\nVigencia: 35 días."
     except Exception as e:
-        print(f"Error al registrar paquete manual: {e}")
-        mensaje = "❌ Error al registrar paquete."
+        print(f"Error al registrar recursos: {e}")
+        mensaje = "❌ Error al registrar recursos."
     finally:
         conn.close()
 
-    # Limpiar
     for key in ['año_seleccionado_paq', 'mes_seleccionado_paq', 'paquete_seleccionado', 'linea_id_paquete']:
         context.user_data.pop(key, None)
 
@@ -430,10 +409,10 @@ async def cancelar_seleccion_fecha_paquete(update: Update, context: ContextTypes
 
 # ▲▲▲ FIN LÓGICA DE FECHAS PARA PAQUETES ▲▲▲
 
-# ▼▼▼ VER PAQUETES ACTIVOS ▼▼▼
+# ▼▼▼ VER RECURSOS ACTIVOS ▼▼▼
 
 async def ver_paquetes_activos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Muestra los paquetes activos de la línea principal."""
+    """Muestra los recursos activos de la línea principal."""
     query = update.callback_query
     await query.answer()
 
@@ -442,42 +421,52 @@ async def ver_paquetes_activos(update: Update, context: ContextTypes.DEFAULT_TYP
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("""
-        SELECT p.tipo_paquete, p.precio, p.fecha_compra, p.fecha_vencimiento
-        FROM paquetes p
-        JOIN lineas l ON p.linea_id = l.id
-        WHERE l.propietario_id = %s AND l.es_principal = TRUE AND p.activo = TRUE
-        ORDER BY p.fecha_vencimiento DESC
+        SELECT rl.tipo_recurso, rl.cantidad, rl.fecha_activacion, rl.fecha_vencimiento, rl.origen_paquete
+        FROM recursos_linea rl
+        JOIN lineas l ON rl.linea_id = l.id
+        WHERE l.propietario_id = %s AND l.es_principal = TRUE AND rl.activo = TRUE
+        ORDER BY rl.tipo_recurso, rl.fecha_vencimiento DESC
     """, (user_id,))
-    paquetes = cur.fetchall()
+    recursos = cur.fetchall()
     cur.close()
     conn.close()
 
     hoy = date.today()
 
-    if not paquetes:
-        texto = "📭 No tienes paquetes activos en tu línea principal.\u200b"
+    if not recursos:
+        texto = "📭 No tienes recursos activos en tu línea principal.\u200b"
     else:
-        texto = "📦 *Tus Paquetes Activos (vigencia 35 días):*\n\n"
-        for tipo, precio, compra, vence in paquetes:
-            dias_restantes = (vence - hoy).days
-            estado = "✅ Activo" if dias_restantes >= 0 else "❌ Vencido"
-            texto += (
-                f"▫️ *{tipo}* - ${precio}\n"
-                f"   📅 Compra: {compra.strftime('%d/%m/%Y')}\n"
-                f"   📆 Vence: {vence.strftime('%d/%m/%Y')} ({estado} - {dias_restantes} días)\n\n"
-            )
+        texto = "📦 *Tus Recursos Activos (vigencia 35 días):*\n\n"
+        recursos_agrupados = {}
+
+        for tipo, cantidad, activacion, vence, origen in recursos:
+            if tipo not in recursos_agrupados:
+                recursos_agrupados[tipo] = []
+            recursos_agrupados[tipo].append((cantidad, activacion, vence, origen))
+
+        for tipo, lista in recursos_agrupados.items():
+            texto += f"*{tipo.upper()}*\n"
+            for cantidad, activacion, vence, origen in lista:
+                dias_restantes = (vence - hoy).days
+                estado = "✅ Activo" if dias_restantes >= 0 else "❌ Vencido"
+                texto += (
+                    f"▫️ {cantidad} {tipo} (desde {activacion.strftime('%d/%m/%Y')})\n"
+                    f"   📆 Vence: {vence.strftime('%d/%m/%Y')} ({estado} - {dias_restantes} días)\n"
+                    f"   ℹ️ Origen: {origen}\n\n"
+                )
 
     keyboard = [[InlineKeyboardButton("⬅️ Volver", callback_data='menu_gestion_paquetes')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode="Markdown")
 
-# ▲▲▲ FIN VER PAQUETES ▲▲▲
+# ▲▲▲ FIN VER RECURSOS ▲▲▲
 
 # ▼▼▼ NAVEGACIÓN ▼▼▼
 
 async def volver_start_paquetes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Vuelve al menú principal (/start) con resumen actualizado."""
+    from modules.start import mostrar_menu_inicio
     await mostrar_menu_inicio(update, context)
 
 async def volver_menu_paquetes(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -487,28 +476,22 @@ async def volver_menu_paquetes(update: Update, context: ContextTypes.DEFAULT_TYP
 # ▲▲▲ FIN NAVEGACIÓN ▲▲▲
 
 def register_handlers(application):
-    # Menú principal
     application.add_handler(CallbackQueryHandler(mostrar_menu_gestion_paquetes, pattern='^gestionar_paquetes$'))
     application.add_handler(CallbackQueryHandler(volver_start_paquetes, pattern='^volver_start_paquetes$'))
     application.add_handler(CallbackQueryHandler(volver_menu_paquetes, pattern='^menu_gestion_paquetes$'))
 
-    # Selección de línea principal
     application.add_handler(CallbackQueryHandler(seleccionar_linea_principal, pattern='^seleccionar_linea_principal$'))
     application.add_handler(CallbackQueryHandler(set_linea_principal, pattern='^set_principal_\\d+$'))
 
-    # Comprar paquete
     application.add_handler(CallbackQueryHandler(comprar_paquete, pattern='^comprar_paquete$'))
     application.add_handler(CallbackQueryHandler(elegir_paquete, pattern='^paquete_\\d+$'))
 
-    # Fechas actuales
     application.add_handler(CallbackQueryHandler(usar_fecha_actual_paquete, pattern='^fecha_actual_paquete$'))
 
-    # Fechas con botones
     application.add_handler(CallbackQueryHandler(iniciar_seleccion_fecha_botones_paquete, pattern='^fecha_botones_paquete$'))
     application.add_handler(CallbackQueryHandler(seleccionar_año_paquete, pattern='^sel_año_paq_\\d+$'))
     application.add_handler(CallbackQueryHandler(seleccionar_mes_paquete, pattern='^sel_mes_paq_\\d+$'))
     application.add_handler(CallbackQueryHandler(seleccionar_dia_paquete, pattern='^sel_dia_paq_\\d+$'))
     application.add_handler(CallbackQueryHandler(cancelar_seleccion_fecha_paquete, pattern='^cancelar_fecha_paquete$'))
 
-    # Ver paquetes activos
     application.add_handler(CallbackQueryHandler(ver_paquetes_activos, pattern='^ver_paquetes_activos$'))

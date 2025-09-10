@@ -41,13 +41,35 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         finally:
             conn.close()
 
-    # 🎨 Generar y enviar el mensaje de inicio con resumen
-    await mostrar_menu_inicio(update, context)  # <-- NUEVO: llamamos a la función
+    # 📊 Obtener datos para el panel de resumen
+    resumen = await generar_panel_resumen(user.id)
+
+    # 🎨 Mensaje de bienvenida + panel de resumen
+    mensaje = (
+        f"👋 ¡Hola {user.first_name}!\n\n"
+        f"🌟 *PANEL DE RESUMEN GENERAL*\n"
+        f"{resumen}\n\n"
+        f"👇 Elige una opción para gestionar tu cuenta:"
+    )
+
+    # 🔘 Creamos los botones en dos filas
+    keyboard = [
+        [
+            InlineKeyboardButton("📱 Consultar Líneas", callback_data='consultar_lineas'),
+            InlineKeyboardButton("📋 Gestionar Líneas", callback_data='gestionar_lineas')
+        ],
+        [
+            InlineKeyboardButton("💳 Gestionar Recargas", callback_data='gestionar_recargas'),
+            InlineKeyboardButton("📦 Gestionar Paquetes", callback_data='gestionar_paquetes')
+        ]
+    ]
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(mensaje, reply_markup=reply_markup, parse_mode="Markdown")
 
 async def mostrar_menu_inicio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Genera y muestra el menú principal con panel de resumen."""
+    """Genera y muestra el menú principal con panel de resumen actualizado."""
     user = update.effective_user
-
 
     # 📊 Obtener datos para el panel de resumen
     resumen = await generar_panel_resumen(user.id)
@@ -74,7 +96,6 @@ async def mostrar_menu_inicio(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-
     if update.message:  # Si viene de /start
         await update.message.reply_text(mensaje, reply_markup=reply_markup, parse_mode="Markdown")
     elif update.callback_query:  # Si viene de un botón "Volver"
@@ -83,9 +104,8 @@ async def mostrar_menu_inicio(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Añadimos \u200b para evitar "Message is not modified"
         await query.edit_message_text(text=mensaje + "\u200b", reply_markup=reply_markup, parse_mode="Markdown")
 
-
 async def generar_panel_resumen(user_id):
-    """Genera un string con el panel de resumen para el usuario."""
+    """Genera un string con el panel de resumen para el usuario, usando la tabla recursos_linea."""
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -129,23 +149,23 @@ async def generar_panel_resumen(user_id):
         numero, alias = linea
         sin_recarga.append(f"{alias or 'Sin alias'} ({numero})")
 
-    # 3. Obtener paquetes próximos a vencer (<= 3 días)
+    # 3. Obtener RECURSOS próximos a vencer (<= 3 días) - ¡CAMBIO CLAVE AQUÍ!
     cur.execute("""
-        SELECT p.tipo_paquete, l.numero_linea, l.nombre_alias, p.fecha_vencimiento
-        FROM paquetes p
-        JOIN lineas l ON p.linea_id = l.id
-        WHERE l.propietario_id = %s AND p.activo = TRUE
-        ORDER BY p.fecha_vencimiento ASC
+        SELECT rl.tipo_recurso, rl.cantidad, l.numero_linea, l.nombre_alias, rl.fecha_vencimiento
+        FROM recursos_linea rl
+        JOIN lineas l ON rl.linea_id = l.id
+        WHERE l.propietario_id = %s AND rl.activo = TRUE
+        ORDER BY rl.fecha_vencimiento ASC
     """, (user_id,))
-    paquetes = cur.fetchall()
-    paquetes_peligro = []
+    recursos = cur.fetchall()
+    recursos_peligro = []
 
-    for tipo, numero, alias, vence in paquetes:
+    for tipo, cantidad, numero, alias, vence in recursos:
         dias_restantes = (vence - hoy).days
         if dias_restantes <= 3 and dias_restantes >= 0:
-            paquetes_peligro.append(f"{tipo} en {alias or 'Sin alias'} ({numero}) → {dias_restantes} días")
+            recursos_peligro.append(f"{cantidad} {tipo} en {alias or 'Sin alias'} ({numero}) → {dias_restantes} días")
         elif dias_restantes < 0:
-            paquetes_peligro.append(f"{tipo} en {alias or 'Sin alias'} ({numero}) → Vencido ({abs(dias_restantes)} días)")
+            recursos_peligro.append(f"{cantidad} {tipo} en {alias or 'Sin alias'} ({numero}) → Vencido ({abs(dias_restantes)} días)")
 
     # 4. Total de líneas activas
     cur.execute("SELECT COUNT(*) FROM lineas WHERE propietario_id = %s AND activa = TRUE", (user_id,))
@@ -172,13 +192,13 @@ async def generar_panel_resumen(user_id):
     else:
         lineas_resumen.append(f"\n✅ *Recargas:* Todas al día")
 
-    # Paquetes en peligro
-    if paquetes_peligro:
-        lineas_resumen.append(f"\n📦 *Paquetes por vencer:*")
-        for item in paquetes_peligro:
+    # Recursos en peligro (antes eran "paquetes")
+    if recursos_peligro:
+        lineas_resumen.append(f"\n📦 *Recursos por vencer:*")
+        for item in recursos_peligro:
             lineas_resumen.append(f"   ▫️ {item}")
     else:
-        lineas_resumen.append(f"\n✅ *Paquetes:* Todos activos")
+        lineas_resumen.append(f"\n✅ *Recursos:* Todos activos")
 
     # Líneas sin recarga
     if sin_recarga:
