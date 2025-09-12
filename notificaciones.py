@@ -2,7 +2,7 @@
 import logging
 from telegram import Bot
 from database.connection import get_db_connection
-from datetime import date, timedelta
+from datetime import date
 
 logger = logging.getLogger(__name__)
 
@@ -14,39 +14,47 @@ async def enviar_mensaje(bot, chat_id, texto):
     except Exception as e:
         logger.error(f"❌ Error al enviar mensaje a {chat_id}: {e}")
 
-async def obtener_recursos_por_vencer(user_id, hoy, umbral_dias=3):
-    """Obtiene recursos (datos, minutos, SMS) por vencer o recién vencidos para un usuario."""
+async def obtener_recursos_por_vencer_o_vencidos(user_id, hoy):
+    """Obtiene recursos (datos, minutos, SMS) por vencer o ya vencidos para un usuario."""
     conn = get_db_connection()
     cur = conn.cursor()
 
-    recursos_por_tipo = {"datos": [], "minutos": [], "sms": []}
+    recursos = {
+        "por_vencer": {"datos": [], "minutos": [], "sms": []},
+        "vencidos": {"datos": [], "minutos": [], "sms": []}
+    }
 
-    # Buscar recursos activos, vencidos hasta 1 día atrás (para notificar vencidos recientes)
     cur.execute("""
-        SELECT rl.tipo_recurso, rl.cantidad, rl.fecha_vencimiento
+        SELECT rl.tipo_recurso, rl.cantidad, rl.fecha_vencimiento, l.numero_linea, l.nombre_alias
         FROM recursos_linea rl
         JOIN lineas l ON rl.linea_id = l.id
         WHERE l.propietario_id = %s AND rl.activo = TRUE
-          AND rl.fecha_vencimiento >= %s  -- Vencidos desde ayer en adelante
-          AND rl.fecha_vencimiento <= %s  -- Hasta dentro de 3 días
         ORDER BY rl.fecha_vencimiento ASC
-    """, (user_id, hoy - timedelta(days=1), hoy + timedelta(days=umbral_dias)))
+    """, (user_id,))
 
-    for tipo, cantidad, vence in cur.fetchall():
+    for tipo, cantidad, vence, numero, alias in cur.fetchall():
         dias_restantes = (vence - hoy).days
-        logger.info(f"🔍 Recurso {tipo}: cantidad={cantidad}, vence={vence}, dias_restantes={dias_restantes}")
-        recursos_por_tipo[tipo].append((cantidad, vence, dias_restantes))
+        nombre_linea = f"{alias or 'Sin alias'} ({numero})"
+
+        logger.info(f"🔍 Recurso {tipo} en {nombre_linea}: vence={vence}, dias_restantes={dias_restantes}")
+
+        if dias_restantes > 0 and dias_restantes <= 3:
+            recursos["por_vencer"][tipo].append((cantidad, vence, dias_restantes, nombre_linea))
+        elif dias_restantes <= 0:
+            dias_vencido = abs(dias_restantes)
+            recursos["vencidos"][tipo].append((cantidad, vence, dias_vencido, nombre_linea))
 
     cur.close()
     conn.close()
-    return recursos_por_tipo
+    return recursos
 
-async def obtener_recargas_por_vencer(user_id, hoy, umbral_dias=3):
-    """Obtiene líneas con recargas por vencer o recién vencidas para un usuario."""
+async def obtener_recargas_por_vencer_o_vencidas(user_id, hoy):
+    """Obtiene recargas por vencer o ya vencidas para un usuario."""
     conn = get_db_connection()
     cur = conn.cursor()
 
-    recargas = []
+    recargas = {"por_vencer": [], "vencidas": []}
+
     cur.execute("""
         SELECT numero_linea, nombre_alias, fecha_ultima_recarga
         FROM lineas
@@ -56,13 +64,15 @@ async def obtener_recargas_por_vencer(user_id, hoy, umbral_dias=3):
     for numero, alias, fecha_ultima in cur.fetchall():
         dias_pasados = (hoy - fecha_ultima).days
         dias_restantes = 30 - dias_pasados
-        logger.info(f"🔍 Línea {numero} ({alias}): fecha_ultima={fecha_ultima}, dias_pasados={dias_pasados}, dias_restantes={dias_restantes}")
+        nombre_linea = f"{alias or 'Sin alias'} ({numero})"
 
-        # Notificar si:
-        # - Está por vencer en los próximos X días (>=0)
-        # - O venció hoy o ayer (>= -1)
-        if dias_restantes <= umbral_dias and dias_restantes >= -1:
-            recargas.append((alias or 'Sin alias', numero, dias_restantes))
+        logger.info(f"🔍 Recarga en {nombre_linea}: fecha_ultima={fecha_ultima}, dias_pasados={dias_pasados}, dias_restantes={dias_restantes}")
+
+        if dias_restantes > 0 and dias_restantes <= 3:
+            recargas["por_vencer"].append((nombre_linea, dias_restantes))
+        elif dias_restantes <= 0:
+            dias_vencida = abs(dias_restantes)
+            recargas["vencidas"].append((nombre_linea, dias_vencida))
 
     cur.close()
     conn.close()
@@ -71,7 +81,6 @@ async def obtener_recargas_por_vencer(user_id, hoy, umbral_dias=3):
 async def enviar_notificaciones_programadas(bot):
     """Función principal: revisa fechas y envía notificaciones precisas."""
     hoy = date.today()
-    umbral_dias = 3
 
     # Obtener todos los usuarios con líneas activas
     conn = get_db_connection()
@@ -83,60 +92,54 @@ async def enviar_notificaciones_programadas(bot):
 
     for user_id in usuarios:
         # Revisar recargas
-        recargas = await obtener_recargas_por_vencer(user_id, hoy, umbral_dias)
+        recargas = await obtener_recargas_por_vencer_o_vencidas(user_id, hoy)
         # Revisar recursos
-        recursos = await obtener_recursos_por_vencer(user_id, hoy, umbral_dias)
+        recursos = await obtener_recursos_por_vencer_o_vencidos(user_id, hoy)
 
-        # Construir mensaje solo si hay algo por vencer o recién vencido
-        partes_mensaje = []
+        # Construir mensaje
+        partes_mensaje = ["🔔 *NOTIFICACIÓN AUTOMÁTICA*\n"]
 
-        # --- Recargas ---
-        recargas_por_vencer = [r for r in recargas if r[2] > 0]
-        recargas_vencidas = [r for r in recargas if r[2] <= 0]
+        # Recargas por vencer
+        if recargas["por_vencer"]:
+            partes_mensaje.append("⚠️ *Recargas Próximas a Vencer (30 días):*")
+            for nombre_linea, dias in recargas["por_vencer"]:
+                partes_mensaje.append(f"▫️ {nombre_linea} → {dias} días restantes")
 
-        if recargas_por_vencer:
-            partes_mensaje.append("⚠️ *Recargas Próximas a Vencer:*")
-            for alias, numero, dias in recargas_por_vencer:
-                partes_mensaje.append(f"▫️ `{numero}` ({alias}) → {dias} días")
+        # Recargas vencidas
+        if recargas["vencidas"]:
+            partes_mensaje.append("\n❌ *Recargas Vencidas:*")
+            for nombre_linea, dias in recargas["vencidas"]:
+                partes_mensaje.append(f"▫️ {nombre_linea} → vencida hace {dias} días")
 
-        if recargas_vencidas:
-            partes_mensaje.append("\n❌ *Recargas Recién Vencidas:*")
-            for alias, numero, dias in recargas_vencidas:
-                dias_texto = "hoy" if dias == 0 else f"hace {abs(dias)} días"
-                partes_mensaje.append(f"▫️ `{numero}` ({alias}) → venció {dias_texto}")
+        # Recursos por vencer
+        tipos = [("datos", "📊 *Datos (GB) Próximos a Vencer:*"), 
+                 ("minutos", "⏱️ *Minutos Próximos a Vencer:*"), 
+                 ("sms", "✉️ *SMS Próximos a Vencer:*")]
 
-        # --- Recursos ---
-        for tipo, emoji, titulo in [
-            ("datos", "📊", "Datos (GB)"),
-            ("minutos", "⏱️", "Minutos"),
-            ("sms", "✉️", "SMS")
-        ]:
-            lista = recursos[tipo]
-            por_vencer = [r for r in lista if r[2] > 0]
-            vencidos = [r for r in lista if r[2] <= 0]
+        for tipo, titulo in tipos:
+            if recursos["por_vencer"][tipo]:
+                partes_mensaje.append(f"\n{titulo}")
+                for cantidad, vence, dias, nombre_linea in recursos["por_vencer"][tipo]:
+                    partes_mensaje.append(f"▫️ {cantidad} {tipo} en {nombre_linea} → {dias} días (vence {vence.strftime('%d/%m')})")
 
-            if por_vencer:
-                partes_mensaje.append(f"\n{emoji} *{titulo} Próximos a Vencer:*")
-                for cantidad, vence, dias in por_vencer:
-                    partes_mensaje.append(f"▫️ {cantidad} {tipo[:-1] if tipo != 'datos' else 'GB'} → {dias} días (vence {vence.strftime('%d/%m')})")
+        # Recursos vencidos
+        tipos_vencidos = [("datos", "📉 *Datos (GB) Vencidos:*"), 
+                          ("minutos", "📉 *Minutos Vencidos:*"), 
+                          ("sms", "📉 *SMS Vencidos:*")]
 
-            if vencidos:
-                partes_mensaje.append(f"\n{emoji}❌ *{titulo} Recién Vencidos:*")
-                for cantidad, vence, dias in vencidos:
-                    dias_texto = "hoy" if dias == 0 else f"hace {abs(dias)} días"
-                    partes_mensaje.append(f"▫️ {cantidad} {tipo[:-1] if tipo != 'datos' else 'GB'} → venció {dias_texto} ({vence.strftime('%d/%m')})")
+        for tipo, titulo in tipos_vencidos:
+            if recursos["vencidos"][tipo]:
+                partes_mensaje.append(f"\n{titulo}")
+                for cantidad, vence, dias, nombre_linea in recursos["vencidos"][tipo]:
+                    partes_mensaje.append(f"▫️ {cantidad} {tipo} en {nombre_linea} → vencido hace {dias} días (venció {vence.strftime('%d/%m')})")
 
-        # Enviar mensaje si hay algo
-        if partes_mensaje:
-            mensaje = (
-                "🔔 *NOTIFICACIÓN AUTOMÁTICA*\n"
-                "Estos son tus servicios próximos a vencer o recién vencidos:\n\n"
-                + "\n".join(partes_mensaje) +
-                "\n\nRevisa detalles con /start."
-            )
+        # Enviar mensaje si hay algo que notificar
+        if len(partes_mensaje) > 1:  # Más que solo el título
+            partes_mensaje.append("\nRevisa todos los detalles con /start.")
+            mensaje = "\n".join(partes_mensaje)
             await enviar_mensaje(bot, user_id, mensaje)
             logger.info(f"📩 Notificación enviada a usuario {user_id}")
         else:
-            logger.info(f"📭 Usuario {user_id} no tiene nada por vencer o recién vencido.")
+            logger.info(f"📭 Usuario {user_id} no tiene recargas ni recursos por vencer o vencidos.")
 
     logger.info("✅ Revisión de notificaciones completada para todos los usuarios.")

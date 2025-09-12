@@ -3,7 +3,6 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackQueryHandler, ContextTypes
 from database.connection import get_db_connection
 from datetime import date
-from modules.start import mostrar_menu_inicio
 
 # Número de líneas por página (para navegación)
 LINEAS_POR_PAGINA = 1  # Mostramos 1 línea a la vez para darle espacio y detalle
@@ -61,16 +60,16 @@ async def mostrar_linea_actual(update: Update, context: ContextTypes.DEFAULT_TYP
     if es_principal:
         titulo += " ⭐"  # Emoji de estrella para línea principal
 
-    # Obtener paquetes activos de esta línea
+    # Obtener recursos activos de esta línea
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("""
-        SELECT tipo_paquete, precio, fecha_compra, fecha_vencimiento
-        FROM paquetes
+        SELECT tipo_recurso, cantidad, fecha_vencimiento
+        FROM recursos_linea
         WHERE linea_id = %s AND activo = TRUE
         ORDER BY fecha_vencimiento DESC
     """, (linea_id,))
-    paquetes = cur.fetchall()
+    recursos = cur.fetchall()
     cur.close()
     conn.close()
 
@@ -99,27 +98,26 @@ async def mostrar_linea_actual(update: Update, context: ContextTypes.DEFAULT_TYP
     if fecha_ultima_recarga:
         recarga_texto += f"\n   📅 Última: {fecha_ultima_recarga.strftime('%d/%m/%Y')}"
 
-    # Construir sección de paquetes
-    if paquetes:
-        paquetes_texto = "📦 *Paquetes Activos:*\n"
-        for tipo, precio, compra, vence in paquetes:
+    # Construir sección de recursos
+    if recursos:
+        recursos_texto = "📦 *Recursos Activos:*\n"
+        for tipo, cantidad, vence in recursos:
             dias_restantes = (vence - hoy).days
             if dias_restantes < 0:
-                estado_paq = f"❌ Vencido (hace {abs(dias_restantes)} días)"
-                emoji_paq = "❌"
+                estado = f"❌ Vencido (hace {abs(dias_restantes)} días)"
+                emoji = "❌"
             elif dias_restantes <= 3:
-                estado_paq = f"⚠️ Pronto ({dias_restantes} días)"
-                emoji_paq = "⚠️"
+                estado = f"⚠️ Pronto ({dias_restantes} días)"
+                emoji = "⚠️"
             else:
-                estado_paq = f"✅ Activo ({dias_restantes} días)"
-                emoji_paq = "✅"
-            paquetes_texto += (
-                f"\n▫️ {emoji_paq} *{tipo}* - ${precio}\n"
-                f"   📅 Compra: {compra.strftime('%d/%m/%Y')}\n"
-                f"   📆 Vence: {vence.strftime('%d/%m/%Y')} ({estado_paq})\n"
+                estado = f"✅ Activo ({dias_restantes} días)"
+                emoji = "✅"
+            recursos_texto += (
+                f"\n▫️ {emoji} *{cantidad} {tipo}* → {estado}\n"
+                f"   📆 Vence: {vence.strftime('%d/%m/%Y')}\n"
             )
     else:
-        paquetes_texto = "📭 *No tiene paquetes activos.*"
+        recursos_texto = "📭 *No tiene recursos activos.*"
 
     # Construir mensaje completo
     mensaje = (
@@ -127,7 +125,7 @@ async def mostrar_linea_actual(update: Update, context: ContextTypes.DEFAULT_TYP
         f"{'─' * 30}\n"
         f"{recarga_texto}\n"
         f"{'─' * 30}\n"
-        f"{paquetes_texto}"
+        f"{recursos_texto}"
     )
 
     # Botones de navegación
@@ -175,7 +173,7 @@ async def navegar_linea_siguiente(update: Update, context: ContextTypes.DEFAULT_
 
 async def volver_start_consulta(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Vuelve al menú principal (/start)."""
-    query = update.callback_query
+    from modules.start import mostrar_menu_inicio
     await mostrar_menu_inicio(update, context)
 
 def register_handlers(application):
