@@ -2,9 +2,7 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackQueryHandler, ContextTypes
 from database.connection import get_db_connection
-from datetime import date, timedelta
-import calendar
-import re
+from datetime import date
 
 # Definición de paquetes (ID, Descripción, Precio)
 PAQUETES = [
@@ -18,95 +16,108 @@ PAQUETES = [
 
 DIAS_VIGENCIA = 35
 
-# Estados para selección de fecha (reutilizamos lógica de recargas)
+# Estados para selección de fecha
 ESTADO_ELEGIR_AÑO_PAQUETE = "elegir_año_paquete"
 ESTADO_ELEGIR_MES_PAQUETE = "elegir_mes_paquete"
 ESTADO_ELEGIR_DIA_PAQUETE = "elegir_dia_paquete"
 
-async def extraer_recursos_de_paquete(tipo_paquete: str) -> list:
-    """Extrae recursos individuales (GB, min, SMS) de un paquete."""
-    recursos = []
-    tipo_lower = tipo_paquete.lower()
-
-    # Extraer GB
-    if "gb" in tipo_lower:
-        match_gb = re.search(r'(\d+\.?\d*)\s*gb', tipo_lower)
-        if match_gb:
-            recursos.append(('datos', float(match_gb.group(1))))
-
-    # Extraer minutos
-    if "min" in tipo_lower:
-        match_min = re.search(r'(\d+\.?\d*)\s*min', tipo_lower)
-        if match_min:
-            recursos.append(('minutos', float(match_min.group(1))))
-
-    # Extraer SMS
-    if "sms" in tipo_lower:
-        match_sms = re.search(r'(\d+\.?\d*)\s*sms', tipo_lower)
-        if match_sms:
-            recursos.append(('sms', float(match_sms.group(1))))
-
-    return recursos
-
-async def registrar_recursos(linea_id: int, recursos: list, fecha_compra: date, conn, tipo_paquete: str):
-    """Registra o actualiza recursos individuales para una línea."""
-    vencimiento = fecha_compra + timedelta(days=DIAS_VIGENCIA)
-    cur = conn.cursor()
-
-    try:
-        for tipo, cantidad in recursos:
-            # Desactivar recursos anteriores del mismo tipo
-            cur.execute("""
-                UPDATE recursos_linea
-                SET activo = FALSE
-                WHERE linea_id = %s AND tipo_recurso = %s AND activo = TRUE
-            """, (linea_id, tipo))
-
-            # Insertar nuevo recurso
-            cur.execute("""
-                INSERT INTO recursos_linea (linea_id, tipo_recurso, cantidad, fecha_activacion, fecha_vencimiento, origen_paquete)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, (linea_id, tipo, cantidad, fecha_compra, vencimiento, tipo_paquete))
-
-        conn.commit()
-    except Exception as e:
-        print(f"Error al registrar recursos: {e}")
-        conn.rollback()
-        raise e
-    finally:
-        cur.close()
-
-async def mostrar_menu_gestion_paquetes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Muestra el menú principal de gestión de paquetes."""
+async def mostrar_gestion_paquetes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Muestra directamente los recursos de la línea principal + botones de acción."""
     query = update.callback_query
-    await query.answer()
+    if query:
+        await query.answer()
 
     user_id = update.effective_user.id
 
+    # Obtener línea principal
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT id FROM lineas WHERE propietario_id = %s AND es_principal = TRUE AND activa = TRUE", (user_id,))
+    cur.execute("""
+        SELECT id, numero_linea, nombre_alias
+        FROM lineas
+        WHERE propietario_id = %s AND es_principal = TRUE AND activa = TRUE
+    """, (user_id,))
     linea_principal = cur.fetchone()
-    cur.close()
-    conn.close()
 
     if not linea_principal:
-        texto = "⚠️ *No tienes una línea principal seleccionada.*\nPor favor, elige una línea para gestionar paquetes.\u200b"
+        # Si no hay línea principal, mostrar mensaje y botón para seleccionar una
+        texto = "⚠️ *No tienes una línea principal seleccionada.*\nPor favor, elige una línea para gestionar paquetes."
         keyboard = [
             [InlineKeyboardButton("📲 Seleccionar Línea Principal", callback_data='seleccionar_linea_principal')],
             [InlineKeyboardButton("⬅️ Volver al inicio", callback_data='volver_start_paquetes')]
         ]
-    else:
-        texto = "📦 *Menú de Gestión de Paquetes*\nElige una opción:\u200b"
-        keyboard = [
-            [InlineKeyboardButton("➕ Comprar Nuevo Paquete", callback_data='comprar_paquete')],
-            [InlineKeyboardButton("📅 Ver Recursos Activos", callback_data='ver_paquetes_activos')],
-            [InlineKeyboardButton("📲 Cambiar Línea Principal", callback_data='seleccionar_linea_principal')],
-            [InlineKeyboardButton("⬅️ Volver al inicio", callback_data='volver_start_paquetes')]
-        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        if query:
+            await query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode="Markdown")
+        else:
+            await update.message.reply_text(text=texto, reply_markup=reply_markup, parse_mode="Markdown")
+        cur.close()
+        conn.close()
+        return
 
+    linea_id, numero, alias = linea_principal
+    nombre_linea = f"{alias or 'Sin alias'} ({numero})"
+
+    # Obtener recursos activos de la línea principal
+    cur.execute("""
+        SELECT tipo_recurso, cantidad, fecha_activacion, fecha_vencimiento, origen_paquete
+        FROM recursos_linea
+        WHERE linea_id = %s AND activo = TRUE
+        ORDER BY tipo_recurso, fecha_vencimiento DESC
+    """, (linea_id,))
+    recursos = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    hoy = date.today()
+
+    # Construir mensaje
+    texto = f"📦 *Gestión de Paquetes*\n*Línea Principal:* {nombre_linea}\n\n"
+
+    if not recursos:
+        texto += "📭 *No tienes recursos activos en esta línea.*\n"
+    else:
+        texto += "📱 *Tus Recursos Activos:*\n\n"
+        recursos_agrupados = {}
+
+        for tipo, cantidad, activacion, vence, origen in recursos:
+            if tipo not in recursos_agrupados:
+                recursos_agrupados[tipo] = []
+            recursos_agrupados[tipo].append((cantidad, activacion, vence, origen))
+
+        for tipo, lista in recursos_agrupados.items():
+            texto += f"*{tipo.upper()}*\n"
+            for cantidad, activacion, vence, origen in lista:
+                dias_restantes = (vence - hoy).days
+                if dias_restantes < 0:
+                    estado = f"❌ Vencido (hace {abs(dias_restantes)} días)"
+                elif dias_restantes <= 3:
+                    estado = f"⚠️ Pronto ({dias_restantes} días)"
+                else:
+                    estado = f"✅ Activo ({dias_restantes} días)"
+                texto += (
+                    f"▫️ {cantidad} {tipo} → {estado}\n"
+                    f"   📅 Desde: {activacion.strftime('%d/%m/%Y')}\n"
+                    f"   📆 Vence: {vence.strftime('%d/%m/%Y')}\n"
+                    f"   ℹ️ Origen: {origen}\n\n"
+                )
+
+    # Botones: Comprar y Cambiar Línea en una fila, Volver en otra
+    keyboard = [
+        [
+            InlineKeyboardButton("➕ Comprar Nuevo Paquete", callback_data='comprar_paquete'),
+            InlineKeyboardButton("📲 Cambiar Línea Principal", callback_data='seleccionar_linea_principal')
+        ],
+        [
+            InlineKeyboardButton("⬅️ Volver al inicio", callback_data='volver_start_paquetes')
+        ]
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode="Markdown")
+
+    if query:
+        await query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text=texto, reply_markup=reply_markup, parse_mode="Markdown")
 
 # ▼▼▼ SELECCIÓN DE LÍNEA PRINCIPAL ▼▼▼
 
@@ -125,20 +136,20 @@ async def seleccionar_linea_principal(update: Update, context: ContextTypes.DEFA
     conn.close()
 
     if not lineas:
-        texto = "📭 No tienes líneas registradas. Registra una primero en 'Gestionar Líneas'.\u200b"
-        keyboard = [[InlineKeyboardButton("⬅️ Volver", callback_data='menu_gestion_paquetes')]]
+        texto = "📭 No tienes líneas registradas. Registra una primero en 'Gestionar Líneas'."
+        keyboard = [[InlineKeyboardButton("⬅️ Volver", callback_data='gestionar_paquetes')]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(text=texto, reply_markup=reply_markup)
         return
 
-    texto = "📲 *Elige la línea que deseas marcar como PRINCIPAL:*\u200b"
+    texto = "📲 *Elige la línea que deseas marcar como PRINCIPAL:*"
     keyboard = []
     for linea in lineas:
         linea_id, numero, alias = linea
         nombre_mostrar = f"{alias or 'Sin alias'} ({numero})"
         keyboard.append([InlineKeyboardButton(nombre_mostrar, callback_data=f'set_principal_{linea_id}')])
 
-    keyboard.append([InlineKeyboardButton("⬅️ Volver", callback_data='menu_gestion_paquetes')])
+    keyboard.append([InlineKeyboardButton("⬅️ Volver", callback_data='gestionar_paquetes')])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode="Markdown")
@@ -157,7 +168,7 @@ async def set_linea_principal(update: Update, context: ContextTypes.DEFAULT_TYPE
         cur.execute("UPDATE lineas SET es_principal = FALSE WHERE propietario_id = %s", (user_id,))
         cur.execute("UPDATE lineas SET es_principal = TRUE WHERE id = %s", (linea_id,))
         conn.commit()
-        mensaje = "✅ ¡Línea marcada como principal!\u200b"
+        mensaje = "✅ ¡Línea marcada como principal!"
     except Exception as e:
         print(f"Error al marcar línea principal: {e}")
         mensaje = "❌ Error al establecer línea principal."
@@ -165,7 +176,7 @@ async def set_linea_principal(update: Update, context: ContextTypes.DEFAULT_TYPE
         cur.close()
         conn.close()
 
-    keyboard = [[InlineKeyboardButton("⬅️ Volver", callback_data='menu_gestion_paquetes')]]
+    keyboard = [[InlineKeyboardButton("⬅️ Volver", callback_data='gestionar_paquetes')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(text=mensaje, reply_markup=reply_markup)
 
@@ -189,7 +200,7 @@ async def comprar_paquete(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not linea_principal:
         await query.edit_message_text(
-            text="❌ No tienes una línea principal seleccionada. Elige una primero.\u200b",
+            text="❌ No tienes una línea principal seleccionada. Elige una primero.",
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("📲 Seleccionar Línea Principal", callback_data='seleccionar_linea_principal')
             ]])
@@ -199,12 +210,12 @@ async def comprar_paquete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     linea_id, numero, alias = linea_principal
     context.user_data['linea_id_paquete'] = linea_id
 
-    texto = f"📦 *Línea Principal: {alias or 'Sin alias'} ({numero})*\n\n*Elige un paquete para comprar:*\u200b"
+    texto = f"📦 *Línea Principal: {alias or 'Sin alias'} ({numero})*\n\n*Elige un paquete para comprar:*"
     keyboard = []
     for pid, desc, precio in PAQUETES:
         keyboard.append([InlineKeyboardButton(f"{desc} - ${precio}", callback_data=f'paquete_{pid}')])
 
-    keyboard.append([InlineKeyboardButton("⬅️ Volver", callback_data='menu_gestion_paquetes')])
+    keyboard.append([InlineKeyboardButton("⬅️ Volver", callback_data='gestionar_paquetes')])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode="Markdown")
@@ -218,7 +229,7 @@ async def elegir_paquete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     paquete = next((p for p in PAQUETES if p[0] == paquete_id), None)
 
     if not paquete:
-        await query.edit_message_text("❌ Paquete no encontrado.\u200b")
+        await query.edit_message_text("❌ Paquete no encontrado.")
         return
 
     context.user_data['paquete_seleccionado'] = paquete  # (id, desc, precio)
@@ -231,12 +242,61 @@ async def elegir_paquete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
-        text=f"📆 *Has elegido: {paquete[1]} - ${paquete[2]}*\n\n*¿Qué fecha de compra deseas registrar?*\u200b",
+        text=f"📆 *Has elegido: {paquete[1]} - ${paquete[2]}*\n\n*¿Qué fecha de compra deseas registrar?*",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
 
 # ▼▼▼ REUTILIZAMOS LÓGICA DE FECHAS (con prefijos para paquetes) ▼▼▼
+
+async def extraer_recursos_de_paquete(tipo_paquete: str) -> list:
+    """Extrae recursos individuales (GB, min, SMS) de un paquete."""
+    recursos = []
+    tipo_lower = tipo_paquete.lower()
+
+    if "gb" in tipo_lower:
+        import re
+        match_gb = re.search(r'(\d+\.?\d*)\s*gb', tipo_lower)
+        if match_gb:
+            recursos.append(('datos', float(match_gb.group(1))))
+
+    if "min" in tipo_lower:
+        match_min = re.search(r'(\d+\.?\d*)\s*min', tipo_lower)
+        if match_min:
+            recursos.append(('minutos', float(match_min.group(1))))
+
+    if "sms" in tipo_lower:
+        match_sms = re.search(r'(\d+\.?\d*)\s*sms', tipo_lower)
+        if match_sms:
+            recursos.append(('sms', float(match_sms.group(1))))
+
+    return recursos
+
+async def registrar_recursos(linea_id: int, recursos: list, fecha_compra: date, conn, tipo_paquete: str):
+    """Registra o actualiza recursos individuales para una línea."""
+    vencimiento = fecha_compra + timedelta(days=DIAS_VIGENCIA)
+    cur = conn.cursor()
+
+    try:
+        for tipo, cantidad in recursos:
+            cur.execute("""
+                UPDATE recursos_linea
+                SET activo = FALSE
+                WHERE linea_id = %s AND tipo_recurso = %s AND activo = TRUE
+            """, (linea_id, tipo))
+
+            cur.execute("""
+                INSERT INTO recursos_linea (linea_id, tipo_recurso, cantidad, fecha_activacion, fecha_vencimiento, origen_paquete)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (linea_id, tipo, cantidad, fecha_compra, vencimiento, tipo_paquete))
+
+        conn.commit()
+    except Exception as e:
+        print(f"Error al registrar recursos: {e}")
+        conn.rollback()
+        raise e
+    finally:
+        cur.close()
 
 async def usar_fecha_actual_paquete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Registra los recursos del paquete con fecha de hoy."""
@@ -247,7 +307,7 @@ async def usar_fecha_actual_paquete(update: Update, context: ContextTypes.DEFAUL
     linea_id = context.user_data.get('linea_id_paquete')
 
     if not paquete or not linea_id:
-        await query.edit_message_text("❌ Error: datos incompletos.\u200b")
+        await query.edit_message_text("❌ Error: datos incompletos.")
         return
 
     hoy = date.today()
@@ -266,7 +326,7 @@ async def usar_fecha_actual_paquete(update: Update, context: ContextTypes.DEFAUL
     context.user_data.pop('paquete_seleccionado', None)
     context.user_data.pop('linea_id_paquete', None)
 
-    keyboard = [[InlineKeyboardButton("⬅️ Volver", callback_data='menu_gestion_paquetes')]]
+    keyboard = [[InlineKeyboardButton("⬅️ Volver", callback_data='gestionar_paquetes')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(text=mensaje, reply_markup=reply_markup)
 
@@ -286,7 +346,7 @@ async def iniciar_seleccion_fecha_botones_paquete(update: Update, context: Conte
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(
-        text="🗓️ *Paso 1 de 3: Elige el AÑO (para fecha de compra):*\u200b",
+        text="🗓️ *Paso 1 de 3: Elige el AÑO (para fecha de compra):*",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
@@ -314,7 +374,7 @@ async def seleccionar_año_paquete(update: Update, context: ContextTypes.DEFAULT
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(
-        text=f"🗓️ *Paso 2 de 3: Elige el MES (Año: {año}):*\u200b",
+        text=f"🗓️ *Paso 2 de 3: Elige el MES (Año: {año}):*",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
@@ -328,6 +388,7 @@ async def seleccionar_mes_paquete(update: Update, context: ContextTypes.DEFAULT_
     año = context.user_data['año_seleccionado_paq']
     context.user_data['mes_seleccionado_paq'] = mes
 
+    import calendar
     num_dias = calendar.monthrange(año, mes)[1]
     dias = list(range(1, num_dias + 1))
 
@@ -351,7 +412,7 @@ async def seleccionar_mes_paquete(update: Update, context: ContextTypes.DEFAULT_
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(
-        text=f"🗓️ *Paso 3 de 3: Elige el DÍA (Mes: {nombre_mes}, Año: {año}):*\u200b",
+        text=f"🗓️ *Paso 3 de 3: Elige el DÍA (Mes: {nombre_mes}, Año: {año}):*",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
@@ -370,7 +431,7 @@ async def seleccionar_dia_paquete(update: Update, context: ContextTypes.DEFAULT_
     try:
         fecha_compra = date(año, mes, dia)
     except ValueError:
-        await query.edit_message_text("❌ Fecha inválida.\u200b")
+        await query.edit_message_text("❌ Fecha inválida.")
         return
 
     recursos = await extraer_recursos_de_paquete(paquete[1])
@@ -388,7 +449,7 @@ async def seleccionar_dia_paquete(update: Update, context: ContextTypes.DEFAULT_
     for key in ['año_seleccionado_paq', 'mes_seleccionado_paq', 'paquete_seleccionado', 'linea_id_paquete']:
         context.user_data.pop(key, None)
 
-    keyboard = [[InlineKeyboardButton("⬅️ Volver", callback_data='menu_gestion_paquetes')]]
+    keyboard = [[InlineKeyboardButton("⬅️ Volver", callback_data='gestionar_paquetes')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(text=mensaje, reply_markup=reply_markup)
 
@@ -401,66 +462,13 @@ async def cancelar_seleccion_fecha_paquete(update: Update, context: ContextTypes
         context.user_data.pop(key, None)
 
     await query.edit_message_text(
-        text="❌ Selección cancelada.\u200b",
+        text="❌ Selección cancelada.",
         reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton("⬅️ Volver", callback_data='comprar_paquete')
         ]])
     )
 
 # ▲▲▲ FIN LÓGICA DE FECHAS PARA PAQUETES ▲▲▲
-
-# ▼▼▼ VER RECURSOS ACTIVOS ▼▼▼
-
-async def ver_paquetes_activos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Muestra los recursos activos de la línea principal."""
-    query = update.callback_query
-    await query.answer()
-
-    user_id = update.effective_user.id
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT rl.tipo_recurso, rl.cantidad, rl.fecha_activacion, rl.fecha_vencimiento, rl.origen_paquete
-        FROM recursos_linea rl
-        JOIN lineas l ON rl.linea_id = l.id
-        WHERE l.propietario_id = %s AND l.es_principal = TRUE AND rl.activo = TRUE
-        ORDER BY rl.tipo_recurso, rl.fecha_vencimiento DESC
-    """, (user_id,))
-    recursos = cur.fetchall()
-    cur.close()
-    conn.close()
-
-    hoy = date.today()
-
-    if not recursos:
-        texto = "📭 No tienes recursos activos en tu línea principal.\u200b"
-    else:
-        texto = "📦 *Tus Recursos Activos (vigencia 35 días):*\n\n"
-        recursos_agrupados = {}
-
-        for tipo, cantidad, activacion, vence, origen in recursos:
-            if tipo not in recursos_agrupados:
-                recursos_agrupados[tipo] = []
-            recursos_agrupados[tipo].append((cantidad, activacion, vence, origen))
-
-        for tipo, lista in recursos_agrupados.items():
-            texto += f"*{tipo.upper()}*\n"
-            for cantidad, activacion, vence, origen in lista:
-                dias_restantes = (vence - hoy).days
-                estado = "✅ Activo" if dias_restantes >= 0 else "❌ Vencido"
-                texto += (
-                    f"▫️ {cantidad} {tipo} (desde {activacion.strftime('%d/%m/%Y')})\n"
-                    f"   📆 Vence: {vence.strftime('%d/%m/%Y')} ({estado} - {dias_restantes} días)\n"
-                    f"   ℹ️ Origen: {origen}\n\n"
-                )
-
-    keyboard = [[InlineKeyboardButton("⬅️ Volver", callback_data='menu_gestion_paquetes')]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    await query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode="Markdown")
-
-# ▲▲▲ FIN VER RECURSOS ▲▲▲
 
 # ▼▼▼ NAVEGACIÓN ▼▼▼
 
@@ -469,29 +477,27 @@ async def volver_start_paquetes(update: Update, context: ContextTypes.DEFAULT_TY
     from modules.start import mostrar_menu_inicio
     await mostrar_menu_inicio(update, context)
 
-async def volver_menu_paquetes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Vuelve al menú de gestión de paquetes."""
-    await mostrar_menu_gestion_paquetes(update, context)
-
 # ▲▲▲ FIN NAVEGACIÓN ▲▲▲
 
 def register_handlers(application):
-    application.add_handler(CallbackQueryHandler(mostrar_menu_gestion_paquetes, pattern='^gestionar_paquetes$'))
-    application.add_handler(CallbackQueryHandler(volver_start_paquetes, pattern='^volver_start_paquetes$'))
-    application.add_handler(CallbackQueryHandler(volver_menu_paquetes, pattern='^menu_gestion_paquetes$'))
+    # Handler principal
+    application.add_handler(CallbackQueryHandler(mostrar_gestion_paquetes, pattern='^gestionar_paquetes$'))
 
+    # Selección de línea principal
     application.add_handler(CallbackQueryHandler(seleccionar_linea_principal, pattern='^seleccionar_linea_principal$'))
     application.add_handler(CallbackQueryHandler(set_linea_principal, pattern='^set_principal_\\d+$'))
 
+    # Comprar paquete
     application.add_handler(CallbackQueryHandler(comprar_paquete, pattern='^comprar_paquete$'))
     application.add_handler(CallbackQueryHandler(elegir_paquete, pattern='^paquete_\\d+$'))
 
+    # Fechas
     application.add_handler(CallbackQueryHandler(usar_fecha_actual_paquete, pattern='^fecha_actual_paquete$'))
-
     application.add_handler(CallbackQueryHandler(iniciar_seleccion_fecha_botones_paquete, pattern='^fecha_botones_paquete$'))
     application.add_handler(CallbackQueryHandler(seleccionar_año_paquete, pattern='^sel_año_paq_\\d+$'))
     application.add_handler(CallbackQueryHandler(seleccionar_mes_paquete, pattern='^sel_mes_paq_\\d+$'))
     application.add_handler(CallbackQueryHandler(seleccionar_dia_paquete, pattern='^sel_dia_paq_\\d+$'))
     application.add_handler(CallbackQueryHandler(cancelar_seleccion_fecha_paquete, pattern='^cancelar_fecha_paquete$'))
 
-    application.add_handler(CallbackQueryHandler(ver_paquetes_activos, pattern='^ver_paquetes_activos$'))
+    # Volver
+    application.add_handler(CallbackQueryHandler(volver_start_paquetes, pattern='^volver_start_paquetes$'))
