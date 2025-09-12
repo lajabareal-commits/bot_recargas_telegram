@@ -12,7 +12,7 @@ from telegram.ext import Application
 
 import config
 from bot.core import TelegramBot  # <-- Aquí está toda tu lógica modular
-from notificaciones import verificar_y_notificar
+from notificaciones import enviar_notificaciones_programadas
 
 # -----------------------
 # Configurar logging
