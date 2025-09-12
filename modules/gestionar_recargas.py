@@ -1,33 +1,77 @@
 # modules/gestionar_recargas.py
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import CallbackQueryHandler, ContextTypes
+from telegram.ext import CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from database.connection import get_db_connection
 from datetime import date
 import calendar
-from modules.start import mostrar_menu_inicio
 
-# Estados (ya no usamos el de texto, todo será con callbacks)
-ESTADO_ELEGIR_AÑO = "elegir_año"
-ESTADO_ELEGIR_MES = "elegir_mes"
-ESTADO_ELEGIR_DIA = "elegir_dia"
+# Estados para el flujo de recarga
+ESTADO_ELEGIR_LINEA = "elegir_linea_recarga"
+ESTADO_ELEGIR_FECHA = "elegir_fecha_recarga"
+ESTADO_INGRESAR_FECHA_MANUAL = "ingresar_fecha_manual"
 
-async def mostrar_menu_gestion_recargas(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Muestra el menú principal de gestión de recargas."""
+async def mostrar_gestion_recargas(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Muestra directamente las próximas recargas + botones de acción."""
     query = update.callback_query
-    await query.answer()
+    if query:
+        await query.answer()
 
+    user_id = update.effective_user.id
+
+    # Obtener todas las líneas con recarga registrada
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT numero_linea, nombre_alias, fecha_ultima_recarga
+        FROM lineas
+        WHERE propietario_id = %s AND activa = TRUE AND fecha_ultima_recarga IS NOT NULL
+        ORDER BY fecha_ultima_recarga ASC
+    """, (user_id,))
+    lineas_con_recarga = cur.fetchall()
+
+    hoy = date.today()
+
+    # Construir mensaje
+    texto = "💳 *Gestión de Recargas*\n\n"
+
+    if not lineas_con_recarga:
+        texto += "📭 *No tienes líneas con recargas registradas.*\n"
+    else:
+        texto += "📅 *Próximas Recargas (cada 30 días):*\n\n"
+        for numero, alias, fecha_ultima in lineas_con_recarga:
+            dias_pasados = (hoy - fecha_ultima).days
+            dias_restantes = 30 - dias_pasados
+            nombre_linea = f"{alias or 'Sin alias'} ({numero})"
+
+            if dias_restantes < 0:
+                estado = f"❌ Vencida (hace {abs(dias_restantes)} días)"
+            elif dias_restantes <= 3:
+                estado = f"⚠️ Pronto ({dias_restantes} días)"
+            else:
+                estado = f"✅ Activa ({dias_restantes} días)"
+
+            texto += (
+                f"▫️ *{nombre_linea}*\n"
+                f"   📅 Última: {fecha_ultima.strftime('%d/%m/%Y')}\n"
+                f"   ⏳ Estado: {estado}\n\n"
+            )
+
+    # Botones: Registrar Recarga y Volver
     keyboard = [
         [InlineKeyboardButton("➕ Registrar Recarga", callback_data='registrar_recarga')],
-        [InlineKeyboardButton("📅 Ver Próximas Recargas", callback_data='ver_proximas_recargas')],
         [InlineKeyboardButton("⬅️ Volver al inicio", callback_data='volver_start_recargas')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await query.edit_message_text(
-        text="💳 *Menú de Gestión de Recargas*\nElige una opción:",
-        reply_markup=reply_markup,
-        parse_mode="Markdown"
-    )
+    if query:
+        await query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text=texto, reply_markup=reply_markup, parse_mode="Markdown")
+
+    cur.close()
+    conn.close()
+
+# ▼▼▼ REGISTRAR RECARGA ▼▼▼
 
 async def registrar_recarga(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Inicia el flujo para registrar una recarga: primero elige la línea."""
@@ -45,22 +89,19 @@ async def registrar_recarga(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not lineas:
         texto = "📭 No tienes líneas registradas. Registra una primero en 'Gestionar Líneas'."
-        keyboard = [[InlineKeyboardButton("⬅️ Volver", callback_data='menu_gestion_recargas')]]
+        keyboard = [[InlineKeyboardButton("⬅️ Volver", callback_data='gestionar_recargas')]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(text=texto, reply_markup=reply_markup)
         return
 
-    # 🔄 AÑADIR UN "ESCAPED ZERO-WIDTH SPACE" PARA FORZAR CAMBIO
-    # Esto es invisible pero hace que el mensaje sea "diferente"
-    texto = "📲 *Elige la línea a la que deseas registrar una recarga:*\u200b"  # ← ¡Añadido \u200b!
-
+    texto = "📲 *Elige la línea a la que deseas registrar una recarga:*"
     keyboard = []
     for linea in lineas:
         linea_id, numero, alias = linea
         nombre_mostrar = f"{alias or 'Sin alias'} ({numero})"
         keyboard.append([InlineKeyboardButton(nombre_mostrar, callback_data=f'elegir_linea_{linea_id}')])
 
-    keyboard.append([InlineKeyboardButton("⬅️ Volver", callback_data='menu_gestion_recargas')])
+    keyboard.append([InlineKeyboardButton("⬅️ Volver", callback_data='gestionar_recargas')])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode="Markdown")
@@ -111,18 +152,17 @@ async def usar_fecha_actual(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cur.close()
         conn.close()
 
-    keyboard = [[InlineKeyboardButton("⬅️ Volver", callback_data='menu_gestion_recargas')]]
+    keyboard = [[InlineKeyboardButton("⬅️ Volver", callback_data='gestionar_recargas')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(text=mensaje, reply_markup=reply_markup)
 
-# ▼▼▼ NUEVO: SELECCIÓN DE FECHA CON BOTONES ▼▼▼
+# ▼▼▼ SELECCIÓN DE FECHA CON BOTONES ▼▼▼
 
 async def iniciar_seleccion_fecha_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Paso 1: Elegir año."""
     query = update.callback_query
     await query.answer()
 
-    # Últimos 3 años + actual + siguiente (para flexibilidad)
     año_actual = date.today().year
     años = [año_actual - 2, año_actual - 1, año_actual, año_actual + 1, año_actual + 2]
 
@@ -176,11 +216,9 @@ async def seleccionar_mes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     año = context.user_data['año_seleccionado']
     context.user_data['mes_seleccionado'] = mes
 
-    # Obtener número de días en ese mes/año (¡considera años bisiestos!)
     num_dias = calendar.monthrange(año, mes)[1]
     dias = list(range(1, num_dias + 1))
 
-    # Organizar días en filas de 5 botones
     keyboard = []
     fila = []
     for dia in dias:
@@ -219,10 +257,9 @@ async def seleccionar_dia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         fecha_recarga = date(año, mes, dia)
     except ValueError:
-        await query.edit_message_text("❌ Fecha inválida. Inténtalo de nuevo.")
+        await query.edit_message_text("❌ Fecha inválida.")
         return
 
-    # Guardar en DB
     conn = get_db_connection()
     cur = conn.cursor()
     try:
@@ -236,20 +273,18 @@ async def seleccionar_dia(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cur.close()
         conn.close()
 
-    # Limpiar
     for key in ['año_seleccionado', 'mes_seleccionado', 'linea_id_recarga']:
         context.user_data.pop(key, None)
 
-    keyboard = [[InlineKeyboardButton("⬅️ Volver", callback_data='menu_gestion_recargas')]]
+    keyboard = [[InlineKeyboardButton("⬅️ Volver", callback_data='gestionar_recargas')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(text=mensaje, reply_markup=reply_markup)
 
 async def cancelar_seleccion_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Cancela la selección de fecha y vuelve al menú anterior."""
+    """Cancela la selección de fecha."""
     query = update.callback_query
     await query.answer()
 
-    # Limpiar datos temporales
     for key in ['año_seleccionado', 'mes_seleccionado', 'linea_id_recarga']:
         context.user_data.pop(key, None)
 
@@ -260,76 +295,32 @@ async def cancelar_seleccion_fecha(update: Update, context: ContextTypes.DEFAULT
         ]])
     )
 
-# ▲▲▲ FIN DE NUEVA LÓGICA ▲▲▲
+# ▲▲▲ FIN SELECCIÓN DE FECHA ▲▲▲
 
-async def ver_proximas_recargas(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Muestra las próximas recargas de todas las líneas."""
-    query = update.callback_query
-    await query.answer()
-
-    user_id = update.effective_user.id
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT numero_linea, nombre_alias, fecha_ultima_recarga
-        FROM lineas
-        WHERE propietario_id = %s AND activa = TRUE AND fecha_ultima_recarga IS NOT NULL
-    """, (user_id,))
-    lineas = cur.fetchall()
-    cur.close()
-    conn.close()
-
-    hoy = date.today()
-
-    if not lineas:
-        texto = "📭 No tienes líneas con recargas registradas."
-    else:
-        texto = "📅 *Próximas Recargas (cada 30 días):*\n\n"
-        for linea in lineas:
-            numero, alias, fecha_ultima = linea
-            if not fecha_ultima:
-                dias_faltantes = "❓ (sin fecha registrada)"
-            else:
-                dias_pasados = (hoy - fecha_ultima).days
-                dias_faltantes = 30 - dias_pasados
-                if dias_faltantes < 0:
-                    dias_faltantes = f"⚠️ {abs(dias_faltantes)} días de retraso"
-                else:
-                    dias_faltantes = f"{dias_faltantes} días"
-
-            texto += f"▫️ *{alias or 'Sin alias'}* (`{numero}`) → Faltan {dias_faltantes}\n"
-
-    keyboard = [[InlineKeyboardButton("⬅️ Volver", callback_data='menu_gestion_recargas')]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    await query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode="Markdown")
+# ▼▼▼ NAVEGACIÓN ▼▼▼
 
 async def volver_start_recargas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Vuelve al menú principal (/start)."""
+    from modules.start import mostrar_menu_inicio
     await mostrar_menu_inicio(update, context)
 
-async def volver_menu_recargas(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Vuelve al menú de gestión de recargas."""
-    await mostrar_menu_gestion_recargas(update, context)
+# ▲▲▲ FIN NAVEGACIÓN ▲▲▲
 
 def register_handlers(application):
-    # Menú principal
-    application.add_handler(CallbackQueryHandler(mostrar_menu_gestion_recargas, pattern='^gestionar_recargas$'))
-    application.add_handler(CallbackQueryHandler(volver_start_recargas, pattern='^volver_start_recargas$'))
-    application.add_handler(CallbackQueryHandler(volver_menu_recargas, pattern='^menu_gestion_recargas$'))
+    # Handler principal
+    application.add_handler(CallbackQueryHandler(mostrar_gestion_recargas, pattern='^gestionar_recargas$'))
 
     # Registrar recarga
     application.add_handler(CallbackQueryHandler(registrar_recarga, pattern='^registrar_recarga$'))
     application.add_handler(CallbackQueryHandler(elegir_linea_para_recarga, pattern='^elegir_linea_\\d+$'))
+
+    # Fechas
     application.add_handler(CallbackQueryHandler(usar_fecha_actual, pattern='^fecha_actual$'))
     application.add_handler(CallbackQueryHandler(iniciar_seleccion_fecha_botones, pattern='^fecha_botones$'))
-
-    # Nueva lógica de selección de fecha
     application.add_handler(CallbackQueryHandler(seleccionar_año, pattern='^sel_año_\\d+$'))
     application.add_handler(CallbackQueryHandler(seleccionar_mes, pattern='^sel_mes_\\d+$'))
     application.add_handler(CallbackQueryHandler(seleccionar_dia, pattern='^sel_dia_\\d+$'))
     application.add_handler(CallbackQueryHandler(cancelar_seleccion_fecha, pattern='^cancelar_fecha$'))
 
-    # Ver próximas recargas
-    application.add_handler(CallbackQueryHandler(ver_proximas_recargas, pattern='^ver_proximas_recargas$'))
+    # Volver
+    application.add_handler(CallbackQueryHandler(volver_start_recargas, pattern='^volver_start_recargas$'))
