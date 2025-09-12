@@ -33,14 +33,16 @@ async def obtener_recursos_por_vencer(user_id, hoy, umbral_dias=3):
 
     for tipo, cantidad, vence in cur.fetchall():
         dias_restantes = (vence - hoy).days
-        recursos_por_tipo[tipo].append((cantidad, vence, dias_restantes))
+        logger.info(f"🔍 Recurso {tipo}: cantidad={cantidad}, vence={vence}, dias_restantes={dias_restantes}")
+        if 0 <= dias_restantes <= umbral_dias:
+            recursos_por_tipo[tipo].append((cantidad, vence, dias_restantes))
 
     cur.close()
     conn.close()
     return recursos_por_tipo
 
 async def obtener_recargas_por_vencer(user_id, hoy, umbral_dias=3):
-    """Obtiene líneas con recargas por vencer para un usuario."""
+    """Obtiene líneas con recargas por vencer o vencidas HOY para un usuario."""
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -54,7 +56,10 @@ async def obtener_recargas_por_vencer(user_id, hoy, umbral_dias=3):
     for numero, alias, fecha_ultima in cur.fetchall():
         dias_pasados = (hoy - fecha_ultima).days
         dias_restantes = 30 - dias_pasados
-        if 0 <= dias_restantes <= umbral_dias:
+        logger.info(f"🔍 Línea {numero} ({alias}): fecha_ultima={fecha_ultima}, dias_pasados={dias_pasados}, dias_restantes={dias_restantes}")
+
+        # Notificar si está por vencer (>=0) o venció hoy o ayer (>= -1)
+        if dias_restantes <= umbral_dias and dias_restantes >= -1:
             recargas.append((alias or 'Sin alias', numero, dias_restantes))
 
     cur.close()
@@ -86,7 +91,8 @@ async def enviar_notificaciones_programadas(bot):
         if recargas:
             partes_mensaje.append("⚠️ *Recargas Próximas a Vencer:*")
             for alias, numero, dias in recargas:
-                partes_mensaje.append(f"▫️ `{numero}` ({alias}) → {dias} días")
+                estado = "✅ Activo" if dias > 0 else "❌ Vencido hoy" if dias == 0 else "‼️ Vencido ayer"
+                partes_mensaje.append(f"▫️ `{numero}` ({alias}) → {abs(dias)} días ({estado})")
 
         if recursos["datos"]:
             partes_mensaje.append("\n📊 *Datos (GB) Próximos a Vencer:*")
