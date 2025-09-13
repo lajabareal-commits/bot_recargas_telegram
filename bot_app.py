@@ -11,7 +11,7 @@ from telegram import Update
 from telegram.ext import Application
 
 import config
-from bot.core import TelegramBot  # <-- Aquí está toda tu lógica modular
+from bot.core import TelegramBot
 from notificaciones import enviar_notificaciones_programadas
 
 # -----------------------
@@ -29,16 +29,8 @@ logger = logging.getLogger(__name__)
 # -----------------------
 bot_app = Application.builder().token(config.TELEGRAM_TOKEN).updater(None).build()
 
-# -----------------------
-# Inicializar tu sistema modular
-# -----------------------
-# Creamos una instancia de TelegramBot, que automáticamente:
-# - Carga todos los módulos en /modules
-# - Registra sus handlers
-# - Inicializa la base de datos
 telegram_bot = TelegramBot()
-# Reutilizamos la aplicación que ya configuró tu clase
-bot_app = telegram_bot.application  # <-- ¡Aquí está toda la magia modular!
+bot_app = telegram_bot.application
 
 # -----------------------
 # Configurar webhook
@@ -56,11 +48,8 @@ async def lifespan(app: FastAPI):
     await bot_app.initialize()
     await bot_app.start()
     logger.info("✅ PTB iniciado")
-
-    # La DB ya se inicializa en TelegramBot.__init__(), pero si quieres log adicional:
     logger.info("✅ Base de datos ya inicializada por TelegramBot")
 
-    # Configurar webhook
     if WEBHOOK_URL:
         try:
             await bot_app.bot.set_webhook(
@@ -101,13 +90,12 @@ async def telegram_webhook(request: Request):
         logger.error(f"❌ Error procesando el update: {e}", exc_info=True)
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
-#------------------------
-# Endpint cron-job para notificaciones
-#------------------------
+# ------------------------
+# Endpoint cron-job para notificaciones
+# ------------------------
 @app.get("/check-notifications")
 @app.post("/check-notifications")
 async def check_notifications_endpoint(request: Request):
-    """Endpoint para que cron-job.org active las notificaciones programadas."""
     logger.info("🔔 [NOTIFICACIONES] Iniciando revisión programada de fechas...")
     try:
         await enviar_notificaciones_programadas(bot_app.bot)
@@ -121,11 +109,16 @@ async def check_notifications_endpoint(request: Request):
 # Ruta de salud
 # -----------------------
 @app.get("/")
-def health(request: Request):
+def health():
     from datetime import datetime
-    user_agent = request.headers.get("User-Agent", "")
-    if "UptimeRobot" in user_agent:
-        return {"status": "OK"}
-    else:
-        logger.info("🟢 Health check: OK")
-        return {"status": "Bot activo", "timestamp": str(datetime.now())}
+    logger.info("🟢 Health check: OK")
+    return {"status": "Bot activo", "timestamp": str(datetime.now())}
+
+# -----------------------
+# Endpoint para UptimeRobot (evitar cold start)
+# -----------------------
+@app.get("/ping")
+def ping():
+    """Endpoint simple para UptimeRobot. Responde 'pong'."""
+    logger.info("🏓 Ping recibido (UptimeRobot)")
+    return {"status": "pong"}
