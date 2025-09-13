@@ -7,9 +7,12 @@ from database.connection import get_db_connection
 from datetime import date, timedelta
 
 class TelegramBot:
-    def __init__(self):
+        def __init__(self):
         self.application = Application.builder().token(TELEGRAM_TOKEN).build()
-        self.limpiar_registros_antiguos()  # <-- Ejecuta limpieza al iniciar
+        try:
+            self.limpiar_registros_antiguos()  # <-- Ejecuta limpieza al iniciar
+        except Exception as e:
+            print(f"❌ Error al ejecutar limpieza automática: {e}")
         self.load_modules()
 
     def limpiar_registros_antiguos(self):
