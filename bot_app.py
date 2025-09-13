@@ -118,6 +118,21 @@ async def check_notifications_endpoint(request: Request):
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
 # -----------------------
+# Endpoint UptimeRobot
+# -----------------------
+@app.get("/health")
+@app.post("/health")
+async def health_check_dedicated():
+    """Endpoint dedicado para UptimeRobot."""
+    from datetime import datetime
+    logger.info("🤖 UptimeRobot: Health check recibido")
+    return JSONResponse(content={
+        "status": "ok",
+        "bot": "activo",
+        "timestamp": str(datetime.now())
+    })
+
+# -----------------------
 # Ruta de salud
 # -----------------------
 @app.get("/")
