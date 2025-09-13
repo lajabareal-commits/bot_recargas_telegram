@@ -8,12 +8,12 @@ from datetime import date, timedelta
 
 class TelegramBot:
         def __init__(self):
-        self.application = Application.builder().token(TELEGRAM_TOKEN).build()
-        try:
-            self.limpiar_registros_antiguos()  # <-- Ejecuta limpieza al iniciar
-        except Exception as e:
-            print(f"❌ Error al ejecutar limpieza automática: {e}")
-        self.load_modules()
+            self.application = Application.builder().token(TELEGRAM_TOKEN).build()
+            try:
+                self.limpiar_registros_antiguos()  # <-- Ejecuta limpieza al iniciar
+            except Exception as e:
+                print(f"❌ Error al ejecutar limpieza automática: {e}")
+            self.load_modules()
 
     def limpiar_registros_antiguos(self):
         """Elimina permanentemente paquetes y recargas con más de 6 meses de antigüedad."""
