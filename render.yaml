@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: telegram-bot-recargas  # Cambia si quieres
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn bot_app:app --host 0.0.0.0 --port ${PORT}
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        fromFile: true
+        value: config.py
+      - key: ADMIN_ID
+        fromFile: true
+        value: config.py
+    envVarsSecrets:
+      - key: TELEGRAM_BOT_TOKEN
+        secret: TELEGRAM_BOT_TOKEN
+      - key: ADMIN_ID
+        secret: ADMIN_ID
