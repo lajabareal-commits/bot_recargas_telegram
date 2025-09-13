@@ -5,8 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-
-from telegram import Update  # ✅ Import correcto para usar Update.ALL_TYPES
+from telegram import Update
 from telegram.ext import Application
 
 import config
@@ -24,11 +23,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # -----------------------
+# Crear aplicación del bot
+# -----------------------
+bot_app = Application.builder().token(config.TELEGRAM_TOKEN).build()
+
+# -----------------------
 # Inicializar tu sistema modular
 # -----------------------
-# TelegramBot ya crea y configura un Application con sus handlers
 telegram_bot = TelegramBot()
-bot_app = telegram_bot.application  # ✅ Nos quedamos solo con esta app
+bot_app = telegram_bot.application  # reutilizamos la app modular
 
 # -----------------------
 # Configurar webhook
@@ -47,12 +50,11 @@ async def lifespan(app: FastAPI):
     await bot_app.start()
     logger.info("✅ PTB iniciado")
 
-    # Configurar webhook
     if WEBHOOK_URL:
         try:
             await bot_app.bot.set_webhook(
                 url=WEBHOOK_URL,
-                allowed_updates=Update.ALL_TYPES,  # ✅ Ahora sí existe
+                allowed_updates=None,  # en v20 basta con None
             )
             logger.info(f"🌐 Webhook configurado: {WEBHOOK_URL}")
         except Exception as e:
@@ -94,7 +96,6 @@ async def telegram_webhook(request: Request):
 @app.get("/check-notifications")
 @app.post("/check-notifications")
 async def check_notifications_endpoint(request: Request):
-    """Endpoint para que cron-job.org active las notificaciones programadas."""
     logger.info("🔔 [NOTIFICACIONES] Iniciando revisión programada de fechas...")
     try:
         await enviar_notificaciones_programadas(bot_app.bot)
@@ -109,7 +110,6 @@ async def check_notifications_endpoint(request: Request):
 # -----------------------
 @app.get("/health")
 async def health_check_dedicated():
-    """Endpoint dedicado para UptimeRobot."""
     from datetime import datetime
     logger.info("🤖 UptimeRobot: Health check recibido")
     return JSONResponse(content={
