@@ -117,7 +117,7 @@ def health():
 # -----------------------
 # Endpoint para UptimeRobot (evitar cold start)
 # -----------------------
-@app.get("/ping")
+@app.head("/ping")
 def ping():
     """Endpoint simple para UptimeRobot. Responde 'pong'."""
     logger.info("🏓 Ping recibido (UptimeRobot)")
