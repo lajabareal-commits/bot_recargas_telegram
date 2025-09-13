@@ -105,7 +105,7 @@ async def telegram_webhook(request: Request):
 # Endpint cron-job para notificaciones
 #------------------------
 @app.get("/check-notifications")
-@app.post("/check-notifications")
+# @app.post("/check-notifications")
 async def check_notifications_endpoint(request: Request):
     """Endpoint para que cron-job.org active las notificaciones programadas."""
     logger.info("🔔 [NOTIFICACIONES] Iniciando revisión programada de fechas...")
