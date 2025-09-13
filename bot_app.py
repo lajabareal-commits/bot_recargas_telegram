@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 # -----------------------
 # Crear aplicación del bot
 # -----------------------
-bot_app = Application.builder().token(config.TELEGRAM_TOKEN).updater(None).build()
+bot_app = Application.builder().token(config.TELEGRAM_TOKEN).build()
 
 # -----------------------
 # Inicializar tu sistema modular
