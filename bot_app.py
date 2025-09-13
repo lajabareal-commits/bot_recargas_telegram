@@ -1,4 +1,3 @@
-# bot_app.py
 import os
 import sys
 import logging
@@ -7,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-# from telegram import Update
+from telegram import Update  # ✅ Import correcto para usar Update.ALL_TYPES
 from telegram.ext import Application
 
 import config
@@ -25,20 +24,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # -----------------------
-# Crear aplicación del bot
-# -----------------------
-bot_app = Application.builder().token(config.TELEGRAM_TOKEN).build()
-
-# -----------------------
 # Inicializar tu sistema modular
 # -----------------------
-# Creamos una instancia de TelegramBot, que automáticamente:
-# - Carga todos los módulos en /modules
-# - Registra sus handlers
-# - Inicializa la base de datos
+# TelegramBot ya crea y configura un Application con sus handlers
 telegram_bot = TelegramBot()
-# Reutilizamos la aplicación que ya configuró tu clase
-bot_app = telegram_bot.application  # <-- ¡Aquí está toda la magia modular!
+bot_app = telegram_bot.application  # ✅ Nos quedamos solo con esta app
 
 # -----------------------
 # Configurar webhook
@@ -57,15 +47,12 @@ async def lifespan(app: FastAPI):
     await bot_app.start()
     logger.info("✅ PTB iniciado")
 
-    # La DB ya se inicializa en TelegramBot.__init__(), pero si quieres log adicional:
-    logger.info("✅ Base de datos ya inicializada por TelegramBot")
-
     # Configurar webhook
     if WEBHOOK_URL:
         try:
             await bot_app.bot.set_webhook(
                 url=WEBHOOK_URL,
-                allowed_updates=Update.ALL_TYPES,
+                allowed_updates=Update.ALL_TYPES,  # ✅ Ahora sí existe
             )
             logger.info(f"🌐 Webhook configurado: {WEBHOOK_URL}")
         except Exception as e:
@@ -102,7 +89,7 @@ async def telegram_webhook(request: Request):
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
 #------------------------
-# Endpint cron-job para notificaciones
+# Endpoint cron-job para notificaciones
 #------------------------
 @app.get("/check-notifications")
 @app.post("/check-notifications")
@@ -121,7 +108,6 @@ async def check_notifications_endpoint(request: Request):
 # Endpoint UptimeRobot
 # -----------------------
 @app.get("/health")
-# @app.post("/health")
 async def health_check_dedicated():
     """Endpoint dedicado para UptimeRobot."""
     from datetime import datetime
