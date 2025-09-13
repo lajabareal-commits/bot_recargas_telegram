@@ -4,7 +4,7 @@ from telegram import Bot
 from database.connection import get_db_connection
 from datetime import date
 
-from utils import limpiar_recursos_viejos
+from utils.limpieza_db import limpiar_recursos_viejos
 
 logger = logging.getLogger(__name__)
 
