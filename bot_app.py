@@ -121,7 +121,11 @@ async def check_notifications_endpoint(request: Request):
 # Ruta de salud
 # -----------------------
 @app.get("/")
-def health():
+def health(request: Request):
     from datetime import datetime
-    logger.info("🟢 Health check: OK")
-    return {"status": "Bot activo", "timestamp": str(datetime.now())}
+    user_agent = request.headers.get("User-Agent", "")
+    if "UptimeRobot" in user_agent:
+        return {"status": "OK"}
+    else:
+        logger.info("🟢 Health check: OK")
+        return {"status": "Bot activo", "timestamp": str(datetime.now())}
