@@ -4,6 +4,8 @@ from telegram import Bot
 from database.connection import get_db_connection
 from datetime import date
 
+from utils import limpiar_recursos_viejos
+
 logger = logging.getLogger(__name__)
 
 async def enviar_mensaje(bot, chat_id, texto):
@@ -79,7 +81,12 @@ async def obtener_recargas_por_vencer_o_vencidas(user_id, hoy):
     return recargas
 
 async def enviar_notificaciones_programadas(bot):
-    """Función principal: revisa fechas y envía notificaciones precisas."""
+    """Función principal: revisa fechas, limpia DB y envía notificaciones."""
+    
+    # 🧹 PASO 1: Limpiar recursos viejos (¡Nuevo!)
+    await limpiar_recursos_viejos()
+
+    # 📅 PASO 2: Revisar y enviar notificaciones (existente)
     hoy = date.today()
 
     # Obtener todos los usuarios con líneas activas
