@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from telegram import Update
+# from telegram import Update
 from telegram.ext import Application
 
 import config
