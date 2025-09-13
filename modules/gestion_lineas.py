@@ -67,7 +67,7 @@ async def mostrar_gestion_lineas(update: Update, context: ContextTypes.DEFAULT_T
     else:
         texto = "📱 *Tus Líneas Registradas:*\n\n"
         for linea_id, numero, alias in lineas:
-            texto += f"▫️ *{alias or 'Sin alias'}* (`{numero}`) — ID: `{linea_id}`\n"
+            texto += f"▫️ *{alias or 'Sin alias'}* (`{numero}`)\n"
 
     # Crear botones: Agregar y Eliminar en una fila, Volver en otra
     keyboard = [

@@ -41,38 +41,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         finally:
             conn.close()
 
-    # 📊 Obtener datos para el panel de resumen
-    resumen = await generar_panel_resumen(user.id)
-
-    # 🎨 Mensaje de bienvenida + panel de resumen
-    mensaje = (
-        f"👋 ¡Hola {user.first_name}!\n\n"
-        f"🌟 *PANEL DE RESUMEN GENERAL*\n"
-        f"{resumen}\n\n"
-        f"👇 Elige una opción para gestionar tu cuenta:"
-    )
-
-    # 🔘 Creamos los botones en dos filas
-    keyboard = [
-        [
-            InlineKeyboardButton("📱 Consultar Líneas", callback_data='consultar_lineas'),
-            InlineKeyboardButton("📋 Gestionar Líneas", callback_data='gestionar_lineas')
-        ],
-        [
-            InlineKeyboardButton("💳 Gestionar Recargas", callback_data='gestionar_recargas'),
-            InlineKeyboardButton("📦 Gestionar Paquetes", callback_data='gestionar_paquetes')
-        ]
-    ]
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(mensaje, reply_markup=reply_markup, parse_mode="Markdown")
+    # 📊 Generar y mostrar el menú de inicio con resumen detallado
+    await mostrar_menu_inicio(update, context)
 
 async def mostrar_menu_inicio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Genera y muestra el menú principal con panel de resumen actualizado."""
+    """Genera y muestra el menú principal con panel de resumen detallado."""
     user = update.effective_user
 
     # 📊 Obtener datos para el panel de resumen
-    resumen = await generar_panel_resumen(user.id)
+    resumen = await generar_panel_resumen_detallado(user.id)
 
     # 🎨 Mensaje de bienvenida + panel de resumen
     mensaje = (
@@ -104,112 +81,75 @@ async def mostrar_menu_inicio(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Añadimos \u200b para evitar "Message is not modified"
         await query.edit_message_text(text=mensaje + "\u200b", reply_markup=reply_markup, parse_mode="Markdown")
 
-async def generar_panel_resumen(user_id):
-    """Genera un string con el panel de resumen para el usuario, usando la tabla recursos_linea."""
+async def generar_panel_resumen_detallado(user_id):
+    """Genera un string con el panel de resumen detallado para el usuario."""
     conn = get_db_connection()
     cur = conn.cursor()
-
     hoy = date.today()
 
-    # 1. Obtener línea principal
+    # Obtener todas las líneas activas, poniendo la principal primero
     cur.execute("""
-        SELECT numero_linea, nombre_alias
+        SELECT id, numero_linea, nombre_alias, fecha_ultima_recarga, es_principal
         FROM lineas
-        WHERE propietario_id = %s AND es_principal = TRUE AND activa = TRUE
+        WHERE propietario_id = %s AND activa = TRUE
+        ORDER BY es_principal DESC, id ASC
     """, (user_id,))
-    principal = cur.fetchone()
+    lineas = cur.fetchall()
 
-    # 2. Obtener recargas próximas a vencer (<= 3 días)
-    cur.execute("""
-        SELECT l.numero_linea, l.nombre_alias, l.fecha_ultima_recarga
-        FROM lineas l
-        WHERE l.propietario_id = %s AND l.activa = TRUE AND l.fecha_ultima_recarga IS NOT NULL
-    """, (user_id,))
-    lineas_con_recarga = cur.fetchall()
-    recargas_peligro = []
-    sin_recarga = []
+    if not lineas:
+        cur.close()
+        conn.close()
+        return "📭 *No tienes líneas registradas aún.*"
 
-    for linea in lineas_con_recarga:
-        numero, alias, fecha_ultima = linea
-        dias_pasados = (hoy - fecha_ultima).days
-        dias_restantes = 30 - dias_pasados
-        if dias_restantes <= 3 and dias_restantes >= 0:
-            recargas_peligro.append(f"{alias or 'Sin alias'} ({numero}) → {dias_restantes} días")
-        elif dias_restantes < 0:
-            recargas_peligro.append(f"{alias or 'Sin alias'} ({numero}) → Vencida ({abs(dias_restantes)} días)")
+    partes_resumen = []
 
-    # Líneas sin recarga registrada
-    cur.execute("""
-        SELECT numero_linea, nombre_alias
-        FROM lineas
-        WHERE propietario_id = %s AND activa = TRUE AND fecha_ultima_recarga IS NULL
-    """, (user_id,))
-    lineas_sin_recarga = cur.fetchall()
-    for linea in lineas_sin_recarga:
-        numero, alias = linea
-        sin_recarga.append(f"{alias or 'Sin alias'} ({numero})")
+    for linea_id, numero, alias, fecha_ultima_recarga, es_principal in lineas:
+        nombre_linea = f"{alias or 'Sin alias'} ({numero})"
+        if es_principal:
+            nombre_linea += " ⭐"
 
-    # 3. Obtener RECURSOS próximos a vencer (<= 3 días) - ¡CAMBIO CLAVE AQUÍ!
-    cur.execute("""
-        SELECT rl.tipo_recurso, rl.cantidad, l.numero_linea, l.nombre_alias, rl.fecha_vencimiento
-        FROM recursos_linea rl
-        JOIN lineas l ON rl.linea_id = l.id
-        WHERE l.propietario_id = %s AND rl.activo = TRUE
-        ORDER BY rl.fecha_vencimiento ASC
-    """, (user_id,))
-    recursos = cur.fetchall()
-    recursos_peligro = []
+        partes_resumen.append(f"\n📱 *{nombre_linea}*")
 
-    for tipo, cantidad, numero, alias, vence in recursos:
-        dias_restantes = (vence - hoy).days
-        if dias_restantes <= 3 and dias_restantes >= 0:
-            recursos_peligro.append(f"{cantidad} {tipo} en {alias or 'Sin alias'} ({numero}) → {dias_restantes} días")
-        elif dias_restantes < 0:
-            recursos_peligro.append(f"{cantidad} {tipo} en {alias or 'Sin alias'} ({numero}) → Vencido ({abs(dias_restantes)} días)")
+        # Estado de recarga
+        if fecha_ultima_recarga:
+            dias_pasados = (hoy - fecha_ultima_recarga).days
+            dias_restantes = 30 - dias_pasados
+            if dias_restantes < 0:
+                estado_recarga = f"❌ Vencida (hace {abs(dias_restantes)} días)"
+            elif dias_restantes <= 3:
+                estado_recarga = f"⚠️ Pronto ({dias_restantes} días)"
+            else:
+                estado_recarga = f"✅ Activa ({dias_restantes} días)"
+            partes_resumen.append(f"   🔋 Recarga: {estado_recarga} (última: {fecha_ultima_recarga.strftime('%d/%m')})")
+        else:
+            partes_resumen.append("   ❓ Sin recarga registrada")
 
-    # 4. Total de líneas activas
-    cur.execute("SELECT COUNT(*) FROM lineas WHERE propietario_id = %s AND activa = TRUE", (user_id,))
-    total_lineas = cur.fetchone()[0]
+        # Recursos activos
+        cur.execute("""
+            SELECT tipo_recurso, cantidad, fecha_vencimiento, origen_paquete
+            FROM recursos_linea
+            WHERE linea_id = %s AND activo = TRUE
+            ORDER BY tipo_recurso, fecha_vencimiento ASC
+        """, (linea_id,))
+        recursos = cur.fetchall()
+
+        if recursos:
+            for tipo, cantidad, vence, origen in recursos:
+                dias_restantes = (vence - hoy).days
+                if dias_restantes < 0:
+                    estado = f"❌ Vencido (hace {abs(dias_restantes)} días)"
+                elif dias_restantes <= 3:
+                    estado = f"⚠️ Pronto ({dias_restantes} días)"
+                else:
+                    estado = f"✅ Activo ({dias_restantes} días)"
+                partes_resumen.append(f"   📦 {cantidad} {tipo} → {estado} (vence {vence.strftime('%d/%m')})")
+        else:
+            partes_resumen.append("   📭 Sin recursos activos")
 
     cur.close()
     conn.close()
 
-    # 🧩 Construir el panel de resumen
-    lineas_resumen = []
-
-    # Línea principal
-    if principal:
-        numero, alias = principal
-        lineas_resumen.append(f"⭐ *Línea Principal:* {alias or 'Sin alias'} (`{numero}`)")
-    else:
-        lineas_resumen.append("⚠️ *Línea Principal:* No seleccionada")
-
-    # Recargas en peligro
-    if recargas_peligro:
-        lineas_resumen.append(f"\n⚠️ *Recargas por vencer:*")
-        for item in recargas_peligro:
-            lineas_resumen.append(f"   ▫️ {item}")
-    else:
-        lineas_resumen.append(f"\n✅ *Recargas:* Todas al día")
-
-    # Recursos en peligro (antes eran "paquetes")
-    if recursos_peligro:
-        lineas_resumen.append(f"\n📦 *Recursos por vencer:*")
-        for item in recursos_peligro:
-            lineas_resumen.append(f"   ▫️ {item}")
-    else:
-        lineas_resumen.append(f"\n✅ *Recursos:* Todos activos")
-
-    # Líneas sin recarga
-    if sin_recarga:
-        lineas_resumen.append(f"\n❓ *Líneas sin recarga:*")
-        for item in sin_recarga:
-            lineas_resumen.append(f"   ▫️ {item}")
-
-    # Total de líneas
-    lineas_resumen.append(f"\n📊 *Total Líneas Activas:* {total_lineas}")
-
-    return "\n".join(lineas_resumen)
+    return "\n".join(partes_resumen)
 
 def register_handlers(application):
     application.add_handler(CommandHandler("start", start))
