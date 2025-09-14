@@ -2,7 +2,7 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackQueryHandler, ContextTypes
 from database.connection import get_db_connection
-from datetime import date
+from datetime import date, timedelta
 
 # Definición de paquetes (ID, Descripción, Precio)
 PAQUETES = [
