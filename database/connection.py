@@ -74,23 +74,35 @@ def init_db():
         # ========================
         # VERIFICAR Y AGREGAR COLUMNAS FALTANTES (si se añaden en el futuro)
         # ========================
-        # Ejemplo: si en el futuro necesitas agregar una columna 'notas' a 'lineas'
-        try:
-            cur.execute("ALTER TABLE lineas ADD COLUMN notas TEXT;")
-            logger.info("✅ Columna 'notas' agregada a tabla 'lineas'.")
-        except psycopg2.errors.DuplicateColumn:
-            # La columna ya existe → no hacer nada
-            pass
+        # Agregar columna 'notas' a 'lineas' solo si no existe
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_name = 'lineas' AND column_name = 'notas'
+                ) THEN
+                    ALTER TABLE lineas ADD COLUMN notas TEXT;
+                    RAISE NOTICE '✅ Columna ''notas'' agregada a tabla ''lineas''.';
+                END IF;
+            END $$;
+        """)
 
-        # Ejemplo: si necesitas agregar 'fecha_ultimo_uso' a 'usuarios'
-        try:
-            cur.execute("ALTER TABLE usuarios ADD COLUMN fecha_ultimo_uso TIMESTAMP;")
-            logger.info("✅ Columna 'fecha_ultimo_uso' agregada a tabla 'usuarios'.")
-        except psycopg2.errors.DuplicateColumn:
-            pass
-
-        # ¡AQUÍ PUEDES AGREGAR MÁS COLUMNAS EN EL FUTURO!
-        # Solo copia el bloque try/except y cambia el ALTER TABLE.
+        # Agregar columna 'fecha_ultimo_uso' a 'usuarios' solo si no existe
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_name = 'usuarios' AND column_name = 'fecha_ultimo_uso'
+                ) THEN
+                    ALTER TABLE usuarios ADD COLUMN fecha_ultimo_uso TIMESTAMP;
+                    RAISE NOTICE '✅ Columna ''fecha_ultimo_uso'' agregada a tabla ''usuarios''.';
+                END IF;
+            END $$;
+        """)
 
         conn.commit()
         logger.info("✅ Base de datos inicializada. Tablas y columnas verificadas.")
