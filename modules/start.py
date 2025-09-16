@@ -2,6 +2,7 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CommandHandler, ContextTypes
 from utils.auth import is_user_authorized
+from utils.recargas import calcular_estado_recarga
 from database.connection import get_db_connection
 from datetime import date
 
@@ -112,14 +113,8 @@ async def generar_panel_resumen_detallado(user_id):
 
         # Estado de recarga
         if fecha_ultima_recarga:
-            dias_pasados = (hoy - fecha_ultima_recarga).days
-            dias_restantes = 30 - dias_pasados
-            if dias_restantes < 0:
-                estado_recarga = f"❌ Vencida (hace {abs(dias_restantes)} días)"
-            elif dias_restantes <= 3:
-                estado_recarga = f"⚠️ Pronto ({dias_restantes} días)"
-            else:
-                estado_recarga = f"✅ Activa ({dias_restantes} días)"
+            estado_info = calcular_estado_recarga(fecha_ultima_recarga, hoy)
+            estado_recarga = estado_info["estado"]
             partes_resumen.append(f"   🔋 Recarga: {estado_recarga} (última: {fecha_ultima_recarga.strftime('%d/%m')})")
         else:
             partes_resumen.append("   ❓ Sin recarga registrada")

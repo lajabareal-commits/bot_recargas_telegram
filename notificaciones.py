@@ -5,6 +5,7 @@ from database.connection import get_db_connection
 from datetime import date
 
 from utils.limpieza_db import limpiar_recursos_viejos
+from utils.recargas import calcular_estado_recarga
 
 logger = logging.getLogger(__name__)
 
@@ -64,17 +65,18 @@ async def obtener_recargas_por_vencer_o_vencidas(user_id, hoy):
     """, (user_id,))
 
     for numero, alias, fecha_ultima in cur.fetchall():
-        dias_pasados = (hoy - fecha_ultima).days
-        dias_restantes = 30 - dias_pasados
+        estado_info = calcular_estado_recarga(fecha_ultima, hoy)
         nombre_linea = f"{alias or 'Sin alias'} ({numero})"
 
-        logger.info(f"🔍 Recarga en {nombre_linea}: fecha_ultima={fecha_ultima}, dias_pasados={dias_pasados}, dias_restantes={dias_restantes}")
+        logger.info(f"🔍 Recarga en {nombre_linea}: fecha_ultima={fecha_ultima}, estado={estado_info['estado']}")
 
-        if dias_restantes > 0 and dias_restantes <= 3:
-            recargas["por_vencer"].append((nombre_linea, dias_restantes))
-        elif dias_restantes <= 0:
-            dias_vencida = abs(dias_restantes)
-            recargas["vencidas"].append((nombre_linea, dias_vencida))
+        if "Pronto" in estado_info["estado"] or "Vence hoy" in estado_info["estado"]:
+            # Notificar si está por vencer (día 30) o vencida (día 31+)
+            dias_restantes = estado_info["dias_restantes"] or 0
+            if dias_restantes >= 0:
+                recargas["por_vencer"].append((nombre_linea, dias_restantes))
+            else:
+                recargas["vencidas"].append((nombre_linea, abs(dias_restantes)))
 
     cur.close()
     conn.close()

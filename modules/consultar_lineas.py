@@ -3,6 +3,8 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackQueryHandler, ContextTypes
 from database.connection import get_db_connection
 from datetime import date
+from utils.recargas import calcular_estado_recarga
+
 
 # Número de líneas por página (para navegación)
 LINEAS_POR_PAGINA = 1  # Mostramos 1 línea a la vez para darle espacio y detalle
@@ -76,22 +78,13 @@ async def mostrar_linea_actual(update: Update, context: ContextTypes.DEFAULT_TYP
     hoy = date.today()
 
     # Calcular estado de recarga
-    estado_recarga = "❓ Sin recarga registrada"
-    dias_para_recarga = None
-    emoji_recarga = "⚪"
-
-    if fecha_ultima_recarga:
-        dias_pasados = (hoy - fecha_ultima_recarga).days
-        dias_para_recarga = 30 - dias_pasados
-        if dias_para_recarga <= 0:
-            estado_recarga = f"❌ Vencida (hace {abs(dias_para_recarga)} días)"
-            emoji_recarga = "❌"
-        elif dias_para_recarga <= 3:
-            estado_recarga = f"⚠️ Pronto ({dias_para_recarga} días)"
-            emoji_recarga = "⚠️"
-        else:
-            estado_recarga = f"✅ Activa ({dias_para_recarga} días restantes)"
-            emoji_recarga = "✅"
+     if fecha_ultima_recarga:
+        estado_info = calcular_estado_recarga(fecha_ultima_recarga, hoy)
+        estado_recarga = estado_info["estado"]
+        emoji_recarga = estado_info["emoji"]
+    else:
+        estado_recarga = "❓ Sin recarga registrada"
+        emoji_recarga = "⚪"
 
     # Construir sección de recarga
     recarga_texto = f"{emoji_recarga} *Recarga:* {estado_recarga}"
