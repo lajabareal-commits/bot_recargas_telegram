@@ -78,7 +78,7 @@ async def mostrar_linea_actual(update: Update, context: ContextTypes.DEFAULT_TYP
     hoy = date.today()
 
     # Calcular estado de recarga
-     if fecha_ultima_recarga:
+    if fecha_ultima_recarga:
         estado_info = calcular_estado_recarga(fecha_ultima_recarga, hoy)
         estado_recarga = estado_info["estado"]
         emoji_recarga = estado_info["emoji"]
